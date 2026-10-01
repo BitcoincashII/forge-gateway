@@ -1,0 +1,174 @@
+name: Release
+
+# Forge Gateway's source lives in BitcoincashII/forge-solo, where it shares the stratum and TIDES
+# code with Forge Solo; FORGE_SOLO_COMMIT pins the commit a release is built from. Every push and
+# pull request builds and tests that commit. A v* tag also signs the Windows program, in a job only
+# tags reach (the certificate is a secret of the `release` environment), and publishes the release
+# with the version's section of RELEASE_NOTES.md.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      commit: ${{ steps.src.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read the source commit
+        id: src
+        run: |
+          c=$(tr -d '[:space:]' < FORGE_SOLO_COMMIT)
+          case "$c" in ''|*[!0-9a-f]*) echo "::error::FORGE_SOLO_COMMIT is not a commit hash"; exit 1 ;; esac
+          [ ${#c} -eq 40 ] || { echo "::error::FORGE_SOLO_COMMIT must be a full 40-character commit hash"; exit 1; }
+          echo "commit=$c" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: BitcoincashII/forge-solo
+          ref: ${{ steps.src.outputs.commit }}
+          path: src
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+
+      - name: Resolve the version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dev"; fi
+          case "$V" in ''|*[!0-9A-Za-z.-]*) echo "::error::not a version: '$V'"; exit 1 ;; esac
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        working-directory: src
+        run: go test ./cmd/forge-gateway ./internal/blockbuild ./internal/tidesgw ./internal/stratum ./internal/mining ./internal/datum/... ./internal/tides ./internal/cashaddr
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            goos="${target%/*}"; goarch="${target#*/}"
+            name="forge-gateway-${V}-${goos}-${goarch}"
+            exe=forge-gateway; [ "$goos" = windows ] && exe=forge-gateway.exe
+            mkdir -p "stage/$name"
+            (cd src && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath \
+              -ldflags "-s -w -X main.version=${V}" -o "../stage/$name/$exe" ./cmd/forge-gateway)
+            cp LICENSE README.md src/cmd/forge-gateway/forge-gateway.example.json "stage/$name/"
+            if [ "$goos" = linux ]; then cp src/cmd/forge-gateway/forge-gateway.service "stage/$name/"; fi
+          done
+          ./stage/forge-gateway-${V}-linux-amd64/forge-gateway -version
+
+      - name: Keep the build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stage
+          path: stage/
+          if-no-files-found: error
+
+  publish:
+    name: Sign and publish the release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write   # create the release
+    env:
+      V: ${{ needs.build.outputs.version }}
+      SRC: ${{ needs.build.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Take the build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: stage
+          path: stage
+
+      # A tag build must not publish an unsigned Windows program.
+      - name: Sign the Windows program
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          EXE="stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe"
+          if [ -z "$PFX_B64" ]; then
+            echo "::error::WINDOWS_SIGNING_PFX_B64 is not set in the release environment; refusing to publish an unsigned program."
+            exit 1
+          fi
+          printf '%s' "$PFX_B64" | base64 -d > /tmp/signing.pfx
+          # The signer's container runs as uid 1000; the runner's workspace belongs to uid 1001.
+          chmod a+w .
+          docker run --rm -v "$PWD":/w -v /tmp:/s -w /w --entrypoint osslsigncode amake/innosetup \
+            sign -pkcs12 /s/signing.pfx -pass "$PFX_PASS" \
+            -n "Forge Gateway" -i "https://github.com/${GITHUB_REPOSITORY}" \
+            -h sha256 -in "$EXE" -out "/w/signed.exe"
+          mv signed.exe "$EXE"
+          shred -u /tmp/signing.pfx 2>/dev/null || rm -f /tmp/signing.pfx
+
+      # Reads the PE certificate table directly rather than trusting the signer's exit code.
+      - name: Verify the signature is present
+        run: |
+          python3 - "stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe" <<'EOF'
+          import struct, sys
+          d = open(sys.argv[1], 'rb').read()
+          pe = struct.unpack_from('<I', d, 0x3c)[0]
+          magic = struct.unpack_from('<H', d, pe + 24)[0]
+          dd = pe + 24 + (112 if magic == 0x20b else 96)
+          _, size = struct.unpack_from('<II', d, dd + 4 * 8)   # index 4 = certificate table
+          print(f"certificate table: {size} bytes")
+          if size == 0:
+              print("::error::forge-gateway.exe is not signed")
+              sys.exit(1)
+          EOF
+
+      # An artifact does not keep the executable bit, so the Linux programs get theirs back here.
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for d in stage/forge-gateway-"${V}"-*; do
+            name=$(basename "$d")
+            case "$name" in
+              *-windows-*) (cd stage && zip -qr "../dist/$name.zip" "$name") ;;
+              *) chmod 755 "$d/forge-gateway"; chmod 644 "$d"/*.md "$d"/LICENSE "$d"/*.json "$d"/*.service
+                 tar -C stage -czf "dist/$name.tar.gz" "$name" ;;
+            esac
+          done
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+
+      # What changed goes first: the section of RELEASE_NOTES.md headed "## <version>". A release
+      # without one stops here rather than publishing a page that says nothing.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v h="## ${V}" '$0 == h {on = 1; next} /^## / {on = 0} on' RELEASE_NOTES.md > /tmp/changes.md
+          if ! grep -q '[^[:space:]]' /tmp/changes.md; then
+            echo "::error::RELEASE_NOTES.md has no section headed '## ${V}'"
+            exit 1
+          fi
+          {
+            cat /tmp/changes.md
+            printf '\n---\n\n'
+            echo "Built by CI from [BitcoincashII/forge-solo@${SRC:0:12}](https://github.com/BitcoincashII/forge-solo/tree/${SRC}/cmd/forge-gateway); the Windows program is signed. \`SHA256SUMS\` covers the downloads."
+          } > /tmp/notes.md
+          gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag \
+            --title "Forge Gateway ${V}" --notes-file /tmp/notes.md
