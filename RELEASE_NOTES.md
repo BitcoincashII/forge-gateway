@@ -29,7 +29,7 @@ on its own, for people who run their own node and their own mining setup.
 - **When Forge Pool cannot be reached,** the gateway mines solo on your node (a block found then
   pays your payout address in full) and goes back to the pool by itself. With `pool_only` set, it
   turns miners away instead, so they fail over to their backup pool.
-- **Status page** at http://127.0.0.1:7152 (and `/api/status`): the pool connection, your node,
+- **Status page** at http://127.0.0.1:3090 (and `/api/status`): the pool connection, your node,
   what a block found now would pay you, each worker, and blocks found.
 - **The pool connection is HTTPS only.** The pool's answers carry the payout split, so `pool.url`
   must be `https://` (plain `http://` only for a pool on the same machine).

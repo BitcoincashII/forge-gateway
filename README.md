@@ -111,13 +111,13 @@ gateway can serve several people, each paid to their own address.
 
 ## Status page
 
-Open `http://127.0.0.1:7152/` on the gateway machine: the pool connection, your node, what a block
+Open `http://127.0.0.1:3090/` on the gateway machine: the pool connection, your node, what a block
 found now would pay you, each worker's hashrate, and blocks found. The same data is at
 `/api/status` as JSON. It has no login, so it listens on this machine only; set `status.listen`
-to `0.0.0.0:7152` only on a network you trust.
+to `0.0.0.0:3090` only on a network you trust.
 
 To start on a new block the moment your node has it (instead of within a second), add to the
-node's config: `blocknotify=curl -s -X POST http://127.0.0.1:7152/notify`
+node's config: `blocknotify=curl -s -X POST http://127.0.0.1:3090/notify`
 
 ## How you are paid
 
@@ -156,7 +156,7 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `stratum.max_connections_per_ip` | `128` | connections from one address |
 | `pool.url` | `https://pool.bch2.org` | Forge Pool. Must be `https://`: the pool's answers carry the payout split (plain `http://` only for a pool on this machine) |
 | `pool.key_file` | `forge-gateway.key` | this gateway's identity at the pool, created on first start — keep it |
-| `status.listen` | `127.0.0.1:7152` | status page; `off` disables it |
+| `status.listen` | `127.0.0.1:3090` | status page; `off` disables it |
 | `log_file` | console (a Windows service: `forge-gateway.log`) | where the log goes. A log file is kept under 20 MB; the older part moves to `<file>.1` |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` |
 
