@@ -3,6 +3,41 @@
 Each section is the release page text for that version. A `v<version>` tag in this repository
 builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
+## 1.1.0
+
+Forge Gateway for Windows now installs and runs like Forge Solo for Windows: an installer, an icon
+in the taskbar, and its settings in the status page instead of a JSON file.
+
+- **Windows installer:** `ForgeGateway-Setup-1.1.0.exe` installs Forge Gateway for your Windows
+  account. One permission prompt (Windows Command Processor) adds a firewall rule for miners on
+  port 3333, on private and domain networks, for Forge Gateway alone. An option starts it when you
+  sign in. Updates close it cleanly first; uninstalling asks whether to keep your data folder.
+- **Tray icon:** open the status page, copy the settings password, restart or quit Forge Gateway.
+  Its tooltip says what Forge Gateway is doing, or what is wrong. If Forge Solo already uses port
+  3333 on the PC, it says so.
+- **Settings in the status page:** your node's address and login (or its cookie file), your payout
+  address, the coinbase tag and pool only, saved with the settings password, in effect at once:
+  your miners stay connected and get new work within seconds. A new payout address makes them
+  reconnect once, so that miners logged in with a worker name are credited to it. A new install
+  opens the page at Settings.
+- **A Forge Gateway 1.0.0 service** on the PC: the installer offers to stop it cleanly and remove
+  it, and removes the firewall rule 1.0.0's guide had you add, which let any program in on port
+  3333.
+- **It says what is wrong:** the status page and the tray say when Forge Gateway is not set up, when
+  your node cannot be reached or refuses the login, when it is still syncing, and when Forge Pool
+  cannot be reached. Started from the tray, a wrong node login no longer stops Forge Gateway: fix it
+  in Settings. With a cookie file, Forge Gateway reads the node's new cookie by itself when the
+  node restarts.
+- **Console and service:** the zip, as before. Started with `SETTINGS_PASSWORD` (16 characters or
+  more), the console program has the same Settings. Exit code 3 now means the config or
+  `SETTINGS_PASSWORD` is wrong, 4 that a port is taken.
+- **A bitcoincashii:p... payout address is refused at start.** Forge Gateway pays only
+  bitcoincashii:q... addresses; with a p... address 1.0.0 started but got no work from the node.
+- **Signed:** the installer and `forge-gateway.exe`; the tray app inside the installer is not
+  signed. If Smart App Control on Windows 11 blocks it, turn Smart App Control off (Windows
+  Security → App & browser control → Smart App Control settings). Windows 10 has no Smart App
+  Control.
+
 ## 1.0.0
 
 The first release of **Forge Gateway**: mine into Forge Pool's TIDES window from your own BCH2
