@@ -6,7 +6,8 @@ name: Release
 # job only tags reach (the certificate is a secret of the `release` environment), and publishes
 # the release with the version's section of RELEASE_NOTES.md. The program is signed as Forge
 # Solo's installer is: on the runner with Ubuntu's osslsigncode and an RFC 3161 timestamp, and
-# checked against the certificate's fingerprint before anything is published.
+# checked against the certificate's fingerprint before anything is published. A tag also builds
+# the Windows installer, with the signed program in it, and signs it.
 on:
   push:
     branches: [main]
@@ -22,6 +23,9 @@ env:
   # 2036-08-29), by SHA-256 fingerprint. A program signed by anything else is not published, and
   # the fingerprint is printed on every release page so a download can be checked against it.
   SIGNING_CERT_SHA256: '2B:F8:C9:5F:67:AE:32:82:61:C2:59:1B:73:14:11:99:75:C9:E6:CC:C4:5B:4A:00:BF:F5:38:4C:27:09:0C:30'
+  # Inno Setup 6, by digest, the image Forge Solo's release uses. It only ever sees the source and
+  # the programs: signing is done on the runner, and it runs with no network.
+  INNOSETUP_IMAGE: 'amake/innosetup:innosetup6@sha256:81713b854eb12278021045dcb57701fe35312030b2dc1d37710184f294a23f81'
 
 jobs:
   build:
@@ -30,6 +34,7 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       commit: ${{ steps.src.outputs.commit }}
+      installer: ${{ steps.tray.outputs.installer }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -91,6 +96,80 @@ jobs:
         with:
           name: stage
           path: stage/
+          if-no-files-found: error
+
+      # The Windows installer's tray app, from the same forge-solo commit (windows/gateway). Its
+      # tests run here with stand-ins for the Windows parts, as in forge-solo's CI. A commit from
+      # before the installer builds the zip alone; a tag must not.
+      - name: Build the tray app
+        id: tray
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ ! -f src/windows/gateway/forge-gateway.iss ]; then
+            if [ "${GITHUB_REF_TYPE}" = tag ]; then
+              echo "::error::FORGE_SOLO_COMMIT predates Forge Gateway's Windows installer (windows/gateway): bump it"
+              exit 1
+            fi
+            echo "::warning::FORGE_SOLO_COMMIT predates the Windows installer: it is not built"
+            echo "installer=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          (cd src/windows/gateway/launcher && go test -count=1 ./...)
+          go install github.com/akavel/rsrc@v0.10.2
+          (cd src/windows/gateway/launcher && "$(go env GOPATH)/bin/rsrc" -ico forge-gateway.ico -arch amd64 -o rsrc.syso)
+          mkdir -p tray
+          (cd src/windows/gateway/launcher && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath \
+            -ldflags "-H=windowsgui -s -w -X main.version=${V}" -o "$GITHUB_WORKSPACE/tray/forge-gateway-tray.exe" .)
+          echo "installer=true" >> "$GITHUB_OUTPUT"
+
+      # The installer script is forge-solo's and the programs it takes are built here: the two must
+      # name the same files, or the installer compiles and then starts nothing, or lets the wrong
+      # program through the firewall. The image is the one forge-solo's release and CI compile
+      # Forge Solo's installer and this script with.
+      - name: The installer script and this workflow agree
+        if: steps.tray.outputs.installer == 'true'
+        run: |
+          set -uo pipefail
+          iss=src/windows/gateway/forge-gateway.iss
+          ok=1
+          grep -qxF 'Source: "bin\*"; DestDir: "{app}"; Flags: ignoreversion' "$iss" ||
+            { echo "::error::$iss does not install bin whole, where this workflow puts the programs"; ok=; }
+          grep -qxF '#define MyAppExe "forge-gateway-tray.exe"' "$iss" ||
+            { echo "::error::$iss does not start forge-gateway-tray.exe, the tray app this workflow builds"; ok=; }
+          grep -qF "FirewallRule('Forge Gateway Miner (3333)', 'forge-gateway.exe', '3333', 'private,domain');" "$iss" ||
+            { echo "::error::$iss does not let forge-gateway.exe through the firewall"; ok=; }
+          grep -qxF 'OutputBaseFilename=ForgeGateway-Setup-{#MyAppVersion}' "$iss" ||
+            { echo "::error::$iss does not write ForgeGateway-Setup-<version>.exe, which this workflow signs and publishes"; ok=; }
+          solo=$(sed -n "s/^  INNOSETUP_IMAGE: '\(.*\)'\$/\1/p" src/.github/workflows/release.yml)
+          [ "$solo" = "$INNOSETUP_IMAGE" ] ||
+            { echo "::error::INNOSETUP_IMAGE is $INNOSETUP_IMAGE; forge-solo compiles its installers with ${solo:-no image}"; ok=; }
+          [ -n "$ok" ]
+
+      # Compiled here with the unsigned program, so that a mistake in the script or the programs
+      # shows on every push, not first on a tag. The Inno Setup image runs as uid 1000 and the
+      # runner's checkout belongs to uid 1001: only the script's folder, where the installer is
+      # written, is made writable for it.
+      - name: Compile the installer, unsigned, to check it
+        if: steps.tray.outputs.installer == 'true'
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p src/windows/gateway/bin
+          cp "stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe" tray/forge-gateway-tray.exe src/windows/gateway/bin/
+          cp LICENSE src/windows/gateway/bin/LICENSE.txt
+          chmod a+w src/windows/gateway
+          docker run --rm --network none -v "$PWD/src":/work "$INNOSETUP_IMAGE" "/DMyAppVersion=${V}" windows/gateway/forge-gateway.iss
+          test -f "src/windows/gateway/ForgeGateway-Setup-${V}.exe"
+
+      - name: Keep the tray app
+        if: steps.tray.outputs.installer == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tray
+          path: tray/
           if-no-files-found: error
 
   publish:
@@ -190,6 +269,95 @@ jobs:
             exit 1
           fi
 
+      # The installer is compiled again here, from the same forge-solo commit, now with the
+      # forge-gateway.exe signed and verified above in it.
+      - name: Checkout the source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: BitcoincashII/forge-solo
+          ref: ${{ needs.build.outputs.commit }}
+          path: src
+          persist-credentials: false
+
+      - name: Take the tray app
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tray
+          path: tray
+
+      # The zip and the installer then carry the same signed forge-gateway.exe, which SHA256SUMS
+      # lets anyone compare.
+      - name: Compile the installer with the signed program
+        run: |
+          set -euo pipefail
+          EXE="stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe"
+          mkdir -p src/windows/gateway/bin
+          cp "$EXE" tray/forge-gateway-tray.exe src/windows/gateway/bin/
+          cp LICENSE src/windows/gateway/bin/LICENSE.txt
+          if [ "$(sha256sum < src/windows/gateway/bin/forge-gateway.exe)" != "$(sha256sum < "$EXE")" ]; then
+            echo "::error::the installer would not hold the signed forge-gateway.exe"
+            exit 1
+          fi
+          chmod a+w src/windows/gateway
+          docker run --rm --network none -v "$PWD/src":/work "$INNOSETUP_IMAGE" "/DMyAppVersion=${V}" windows/gateway/forge-gateway.iss
+          test -f "src/windows/gateway/ForgeGateway-Setup-${V}.exe"
+
+      # As the program: on the runner, timestamped, each attempt limited in time.
+      - name: Sign the installer
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          EXE="src/windows/gateway/ForgeGateway-Setup-${V}.exe"
+          if [ -z "$PFX_B64" ]; then
+            echo "::error::WINDOWS_SIGNING_PFX_B64 is not set in the release environment; refusing to publish an unsigned installer."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osslsigncode
+          KEY="$RUNNER_TEMP/signing.pfx" PASS="$RUNNER_TEMP/signing.pass"
+          (umask 077; printf '%s' "$PFX_B64" | base64 -d > "$KEY"; printf '%s\n' "$PFX_PASS" > "$PASS")
+          for tsa in http://timestamp.digicert.com http://timestamp.sectigo.com; do
+            rm -f signed.exe
+            if timeout 120 osslsigncode sign -pkcs12 "$KEY" -readpass "$PASS" \
+                -n "Forge Gateway" -i "https://github.com/${GITHUB_REPOSITORY}" \
+                -h sha256 -ts "$tsa" -in "$EXE" -out signed.exe; then
+              break
+            fi
+            rm -f signed.exe
+          done
+          shred -u "$KEY" "$PASS" 2>/dev/null || rm -f "$KEY" "$PASS"
+          if [ ! -f signed.exe ]; then
+            echo "::error::the installer could not be signed and timestamped"
+            exit 1
+          fi
+          mv signed.exe "$EXE"
+
+      # As the program's: the signature, the pinned certificate and the timestamp.
+      - name: Verify the installer's signature
+        run: |
+          EXE="src/windows/gateway/ForgeGateway-Setup-${V}.exe"
+          LEAF="sha256:$(printf '%s' "$SIGNING_CERT_SHA256" | tr -d :)"
+          OUT="$RUNNER_TEMP/verify.txt"
+          osslsigncode extract-signature -in "$EXE" -out "$RUNNER_TEMP/signature.der"
+          openssl pkcs7 -inform DER -in "$RUNNER_TEMP/signature.der" -print_certs -out "$RUNNER_TEMP/signer.pem"
+          ok=
+          for try in 1 2 3; do
+            if timeout 120 osslsigncode verify -in "$EXE" -CAfile "$RUNNER_TEMP/signer.pem" \
+                -TSA-CAfile /etc/ssl/certs/ca-certificates.crt -require-leaf-hash "$LEAF" > "$OUT" 2>&1 &&
+                grep -qx 'Timestamp Server Signature verification: ok' "$OUT"; then
+              ok=1
+            fi
+            cat "$OUT"
+            if [ -n "$ok" ]; then break; fi
+            echo "::warning::try $try: the signature, its certificate or its timestamp did not verify"
+            sleep 15
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::the installer is not signed by Forge Solo's certificate ($SIGNING_CERT_SHA256) with a timestamp that verifies"
+            exit 1
+          fi
+
       # An artifact does not keep the executable bit, so the Linux programs get theirs back here.
       - name: Package
         run: |
@@ -203,6 +371,7 @@ jobs:
                  tar -C stage -czf "dist/$name.tar.gz" "$name" ;;
             esac
           done
+          cp "src/windows/gateway/ForgeGateway-Setup-${V}.exe" dist/
           (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
 
       # What changed goes first: the section of RELEASE_NOTES.md headed "## <version>". A release
@@ -219,7 +388,7 @@ jobs:
           {
             cat /tmp/changes.md
             printf '\n---\n\n'
-            echo "Built by CI from [BitcoincashII/forge-solo@${SRC:0:12}](https://github.com/BitcoincashII/forge-solo/tree/${SRC}/cmd/forge-gateway). \`forge-gateway.exe\` is signed by the certificate with SHA-256 fingerprint \`${SIGNING_CERT_SHA256}\`. \`SHA256SUMS\` covers the downloads."
+            echo "Built by CI from [BitcoincashII/forge-solo@${SRC:0:12}](https://github.com/BitcoincashII/forge-solo/tree/${SRC}/cmd/forge-gateway). \`ForgeGateway-Setup-${V}.exe\` and \`forge-gateway.exe\` are signed by the certificate with SHA-256 fingerprint \`${SIGNING_CERT_SHA256}\`; \`forge-gateway-tray.exe\`, inside the installer, is not. \`SHA256SUMS\` covers the downloads."
           } > /tmp/notes.md
           gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag \
             --title "Forge Gateway ${V}" --notes-file /tmp/notes.md
