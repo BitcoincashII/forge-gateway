@@ -23,10 +23,12 @@ From the [latest release](https://github.com/BitcoincashII/forge-gateway/release
 |---|---|
 | Linux, 64-bit PC or server (x86_64) | `forge-gateway-<version>-linux-amd64.tar.gz` |
 | Linux, 64-bit ARM (a Raspberry Pi with a 64-bit OS, ARM servers) | `forge-gateway-<version>-linux-arm64.tar.gz` |
-| Windows, 64-bit | `forge-gateway-<version>-windows-amd64.zip`, with a signed `forge-gateway.exe` |
+| Windows, 64-bit | `ForgeGateway-Setup-<version>.exe`: installs Forge Gateway with an icon in the taskbar and Settings in its status page |
+| Windows, 64-bit, as a service or in a Command Prompt | `forge-gateway-<version>-windows-amd64.zip`, with a signed `forge-gateway.exe` |
 
-Each holds the program, this README, the license and `forge-gateway.example.json`; the Linux ones
-also hold `forge-gateway.service`. Check your download against `SHA256SUMS`.
+The zip and the Linux downloads each hold the program, this README, the license and
+`forge-gateway.example.json`; the Linux ones also hold `forge-gateway.service`. Check your
+download against `SHA256SUMS`.
 
 ## What you need
 
@@ -45,8 +47,63 @@ rpcallowip=127.0.0.1
 ```
 
 Restart the node after changing it. The gateway can use the node's `.cookie` file instead
-(`rpc_cookie_file`), but a node writes a new cookie every time it restarts, so the gateway would
-need restarting too; a user and password do not have that problem.
+(`rpc_cookie_file`). A node writes a new cookie every time it restarts; Forge Gateway reads the new
+one by itself.
+
+## Windows: install
+
+Forge Gateway for Windows needs 64-bit Windows (Windows 10 or 11 on an x64 PC, or Windows 11 on
+ARM) and what is in [What you need](#what-you-need): a synced BCH2 node with RPC enabled, on this
+PC or on another one on your network.
+
+1. Download `ForgeGateway-Setup-<version>.exe` from the
+   [latest release](https://github.com/BitcoincashII/forge-gateway/releases/latest) and run it.
+   When SmartScreen says "Windows protected your PC", choose **More info**, then **Run anyway**.
+   If Smart App Control on Windows 11 blocks it, turn Smart App Control off: **Windows Security →
+   App & browser control → Smart App Control settings**. Windows 10 has no Smart App Control.
+2. Windows asks once whether Windows Command Processor may make changes to your device: choose
+   **Yes**. That adds one firewall rule, for port 3333 on private and domain networks, that lets
+   in `forge-gateway.exe` only. For miners on other devices, set your network to **Private**: in
+   Windows Settings, under **Network & internet**, open your connection's properties and set its
+   network profile to Private. Windows 11 makes new networks Public.
+3. Forge Gateway starts, puts its icon in the notification area of the taskbar, and opens its
+   status page at **Settings**. Enter your node's RPC address and login (its RPC user and
+   password, or the full path of its `.cookie` file) and your BCH2 payout address. To save,
+   right-click the Forge Gateway icon (if it is not there, click the **^** arrow in the
+   notification area first), choose **Copy Settings Password**, paste it into the password box and
+   choose **Save settings**. Forge Gateway mines as soon as the settings are saved: nothing needs
+   restarting. A payout address saved later makes your miners reconnect once, so that those
+   logged in with a worker name are credited to the new address.
+4. Point your miners at `stratum+tcp://<PC-IP>:3333`, where `<PC-IP>` is the PC's address on your
+   network (see [Your miners](#your-miners)).
+
+Right-click the icon for **Open Status Page**, **Copy Settings Password**, **Restart Forge
+Gateway**, **Open Data Folder** and **Quit Forge Gateway**. Its tooltip says what Forge Gateway is
+doing: not set up yet, your node cannot be reached or refuses the login, your node is still
+syncing, Forge Pool cannot be reached, or mining into the TIDES window.
+
+Forge Gateway keeps its files in `%APPDATA%\ForgeGateway`: `forge-gateway.json` (the settings),
+`forge-gateway.key` (this gateway's identity at Forge Pool), `secrets.env` (the settings password)
+and its logs, `launcher.log` and `forge-gateway.log`. To keep the identity of a gateway you ran
+before, quit Forge Gateway (right-click its icon, **Quit Forge Gateway**), copy your
+`forge-gateway.key` over the one in that folder, and start Forge Gateway again. Enter your node and
+payout address in Settings rather than copying an old `forge-gateway.json`: a copied file with
+`"status": {"listen": "off"}` or a `log_file` keeps the status page or the log from working with
+the tray.
+
+- **Start with Windows:** tick **Start Forge Gateway when I sign in** in the installer. Run the
+  installer again to change it.
+- **Update:** run the new installer. It closes Forge Gateway cleanly first.
+- **Uninstall:** Windows Settings, **Apps**. It asks whether to delete the data folder; **No**
+  keeps it.
+- **Forge Solo on the same PC:** both use port 3333, so run one of the two. Forge Solo's TIDES mode
+  is the same gateway, built in. The tray says when Forge Solo holds the port.
+- **A Forge Gateway 1.0.0 service on the same PC:** the installer says so and offers to stop and
+  remove it. Choose **Yes**: Windows asks once, for the firewall rule and the service together.
+  Its config and key stay where you put them (`C:\ForgeGateway` in 1.0.0's guide): enter the same
+  node and payout address in Settings, and copy the key as above to keep the gateway's identity.
+  The installer also deletes the rule named "Forge Gateway" that 1.0.0's guide added, which let any
+  program in on port 3333.
 
 ## Set up
 
@@ -86,6 +143,10 @@ than a node's `.cookie` file there. To check its own setup once it has started:
 `sudo -u forge-gateway forge-gateway -check -config /etc/forge-gateway/forge-gateway.json`
 
 ### Windows: run as a service
+
+For a service, or to run it in a Command Prompt, use the zip instead of the installer. Use one or
+the other: the installer offers to remove a ForgeGateway service it finds, and a service and the
+installed Forge Gateway cannot both have port 3333.
 
 Put `forge-gateway.exe` and `forge-gateway.json` in a folder of their own, for example
 `C:\ForgeGateway`. From an **Administrator** Command Prompt:
@@ -134,6 +195,11 @@ Open `http://127.0.0.1:3090/` on the gateway machine: the pool connection, your 
 found now would pay you, each worker's hashrate, and blocks found. The same data is at
 `/api/status` as JSON. It has no login, so it listens on this machine only; set `status.listen`
 to `0.0.0.0:3090` only on a network you trust.
+
+It has a Settings panel for the node, the payout address, the coinbase tag and pool only. Forge
+Gateway started with `SETTINGS_PASSWORD` (16 characters or more; the Windows tray app does this)
+saves them with that password, and they take effect at once. Started without it, the panel only
+shows them: edit `forge-gateway.json` and restart.
 
 To start on a new block the moment your node has it (instead of within a second), add to the
 node's config: `blocknotify=curl -s -X POST http://127.0.0.1:3090/notify`
@@ -186,12 +252,18 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `log_file` | console (a Windows service: `forge-gateway.log`) | where the log goes. A log file is kept under 20 MB; the older part moves to `<file>.1` |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` |
 
+The installer's Forge Gateway keeps this file in `%APPDATA%\ForgeGateway`, and Settings writes its
+node and mining keys. A `bitcoincashii:p...` payout address is refused: the gateway pays only
+`bitcoincashii:q...` addresses. Exit codes: 3 when the config or `SETTINGS_PASSWORD` is wrong, 4
+when a listen address is taken, 1 for anything else.
+
 ## Source
 
 Forge Gateway's source is in [BitcoincashII/forge-solo](https://github.com/BitcoincashII/forge-solo/tree/main/cmd/forge-gateway),
-where it shares the stratum and TIDES code with Forge Solo's TIDES mode. Each release is built
-from the forge-solo commit in [`FORGE_SOLO_COMMIT`](FORGE_SOLO_COMMIT), and its release page says
-which. To build it yourself, with Go (the version in forge-solo's `go.mod`):
+where it shares the stratum and TIDES code with Forge Solo's TIDES mode; its Windows installer and
+tray app are in `windows/gateway` there. Each release is built from the forge-solo commit in
+[`FORGE_SOLO_COMMIT`](FORGE_SOLO_COMMIT), and its release page says which. To build it yourself,
+with Go (the version in forge-solo's `go.mod`):
 
 ```
 git clone https://github.com/BitcoincashII/forge-solo && cd forge-solo
