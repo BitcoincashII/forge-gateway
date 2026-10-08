@@ -58,11 +58,17 @@ need restarting too; a user and password do not have that problem.
    forge-gateway -check -config forge-gateway.json
    ```
 
-   It checks the config, logs in to your node, and asks Forge Pool for its TIDES window.
+   It checks the config, logs in to your node, and asks Forge Pool for its TIDES window. It also
+   creates `forge-gateway.key` next to the config: this gateway's identity at the pool.
 3. Run it (`forge-gateway -config forge-gateway.json`), or install it as a service, below.
 4. Point your miners at `stratum+tcp://<this machine's LAN address>:3333`.
 
 ### Linux: run as a service
+
+The service runs as its own user, which can write only to `/var/lib/forge-gateway`. So first set
+`"key_file": "/var/lib/forge-gateway/forge-gateway.key"` in `forge-gateway.json`: the service
+creates its identity at the pool there at its first start (the key file `-check` made next to
+your own copy of the config is not the service's). Then:
 
 ```
 sudo useradd --system --home /var/lib/forge-gateway --shell /usr/sbin/nologin forge-gateway
@@ -75,8 +81,9 @@ sudo systemctl enable --now forge-gateway
 journalctl -u forge-gateway -f
 ```
 
-With the service, set `"key_file": "/var/lib/forge-gateway/forge-gateway.key"` in the config:
-the service can write only to its state directory.
+The service cannot read files under `/home`, so give it `rpc_user` and `rpc_password` rather
+than a node's `.cookie` file there. To check its own setup once it has started:
+`sudo -u forge-gateway forge-gateway -check -config /etc/forge-gateway/forge-gateway.json`
 
 ### Windows: run as a service
 
@@ -89,25 +96,37 @@ forge-gateway.exe -check -config C:\ForgeGateway\forge-gateway.json
 forge-gateway.exe install -config C:\ForgeGateway\forge-gateway.json
 ```
 
-The service starts now and with Windows, and restarts itself if it stops. Its log is
-`C:\ForgeGateway\forge-gateway.log` (or the `log_file` you set). To remove it:
-`forge-gateway.exe uninstall`. You can also just run `forge-gateway.exe -config forge-gateway.json`
-in a Command Prompt window.
+The service starts now and with Windows, and Windows starts it again if it crashes. If it stops
+instead, the config, the node login or a port is wrong: run
+`forge-gateway.exe -config C:\ForgeGateway\forge-gateway.json` in the Command Prompt and it says
+what. Its log is `C:\ForgeGateway\forge-gateway.log` (or the `log_file` you set). To remove the
+service: `forge-gateway.exe uninstall`. You can also just run that command in a Command Prompt
+window instead of installing the service.
 
-Allow the stratum port (3333) through Windows Firewall for your local network if your miners are
-on other machines.
+`forge-gateway.exe` is signed, but not yet by a certificate Windows trusts. If Smart App Control
+on Windows 11 blocks it, turn Smart App Control off: **Windows Security → App & browser control →
+Smart App Control settings**. Windows 10 has no Smart App Control.
+
+If your miners are on other machines, allow the stratum port through Windows Firewall for your
+local network, from the same Administrator prompt:
+
+```
+netsh advfirewall firewall add rule name="Forge Gateway" dir=in action=allow protocol=TCP localport=3333 profile=private,domain
+```
 
 ## Your miners
 
 | Setting | Value |
 |---|---|
 | Pool URL | `stratum+tcp://<gateway machine>:3333` |
-| Username | your BCH2 address, optionally with `.workername` — or just a worker name |
+| Username | your BCH2 address, optionally with `.workername`; or just a worker name |
 | Password | anything (`x`) |
 
 A username that is a BCH2 address is credited to **that address** at the pool; any other username
 is credited to the gateway's `payout_address`, with the username as the worker name. So one
-gateway can serve several people, each paid to their own address.
+gateway can serve several people, each paid to their own address. An address with a typo in it is
+not an address, so it counts as a worker name: the gateway's log says, at each miner's login,
+which address it is credited to.
 
 ## Status page
 
@@ -121,17 +140,24 @@ node's config: `blocknotify=curl -s -X POST http://127.0.0.1:3090/notify`
 
 ## How you are paid
 
-Forge Pool's TIDES window is the most recent shares from every DATUM gateway — Forge Gateways
-and Forge Solo installs in TIDES mode. Every block any of them finds, yours included, pays each
+Forge Pool's TIDES window is the most recent shares from every DATUM gateway: Forge Gateways and
+Forge Solo installs in TIDES mode. Every block any of them finds, yours included, pays each
 address in the window its share of the reward, directly in that block's coinbase. (Blocks found
-by the pool's own stratum miners are paid by the pool's usual payouts, not this window.) The payout reaches your address when the block is
-mined, and can be spent after the usual 100-block coinbase maturity.
+by the pool's own stratum miners are paid by the pool's usual payouts, not this window.) The
+payout reaches your address when the block is mined, and can be spent after the usual 100-block
+coinbase maturity.
 
-While Forge Pool cannot be reached, the gateway mines **solo**: a block found then pays your
+Each job commits to a share difficulty above the highest any of your miners is on (the power of
+two at or above twice it, never above the network's). Only the shares that reach it go to the
+pool, which credits each at that difficulty, so your miners' work counts in full on average; the
+status page shows both counts.
+
+While Forge Pool cannot be reached, or will not take your node's work (your node is still
+catching up after a restart, say), the gateway mines **solo**: a block found then pays your
 `payout_address` the whole reward. It tries the pool again every minute and moves your miners
-back as soon as the pool answers. With `"pool_only": true` it turns miners away instead, so they
-fail over to their backup pool — set that on a gateway that serves other people's addresses,
-because a solo block pays only `payout_address`.
+back as soon as the pool takes its work. With `"pool_only": true` it turns miners away instead,
+so they fail over to their backup pool; set that on a gateway that serves other people's
+addresses, because a solo block pays only `payout_address`.
 
 ## Config reference
 
@@ -142,9 +168,9 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | Key | Default | Meaning |
 |---|---|---|
 | `node.rpc_url` | `http://127.0.0.1:8342` | your node's RPC address |
-| `node.rpc_user`, `node.rpc_password` | — | RPC login |
-| `node.rpc_cookie_file` | — | or read the login from the node's `.cookie` |
-| `mining.payout_address` | — | credited for worker-name logins; paid solo blocks |
+| `node.rpc_user`, `node.rpc_password` | required (or the cookie file) | RPC login |
+| `node.rpc_cookie_file` | (none) | read the login from the node's `.cookie` instead |
+| `mining.payout_address` | required | credited for worker-name logins; paid solo blocks |
 | `mining.coinbase_tag` | `Forge Gateway` | text in your blocks' coinbase, up to 32 characters |
 | `mining.pool_only` | `false` | turn miners away instead of mining solo while the pool is down |
 | `stratum.listen` | `0.0.0.0:3333` | where miners connect |
@@ -155,7 +181,7 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `stratum.max_connections` | `256` | connections in total |
 | `stratum.max_connections_per_ip` | `128` | connections from one address |
 | `pool.url` | `https://pool.bch2.org` | Forge Pool. Must be `https://`: the pool's answers carry the payout split (plain `http://` only for a pool on this machine) |
-| `pool.key_file` | `forge-gateway.key` | this gateway's identity at the pool, created on first start — keep it |
+| `pool.key_file` | `forge-gateway.key` | this gateway's identity at the pool, created on first start; keep it |
 | `status.listen` | `127.0.0.1:3090` | status page; `off` disables it |
 | `log_file` | console (a Windows service: `forge-gateway.log`) | where the log goes. A log file is kept under 20 MB; the older part moves to `<file>.1` |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -180,9 +206,9 @@ DATUM (Decentralized Alternative Templates for Universal Mining) and TIDES were 
 built by OCEAN: <https://ocean.xyz/docs/datum>, <https://ocean.xyz/docs/tides>, and the original
 [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) (Copyright (c) 2024-2025 Bitcoin
 Ocean, LLC, Jason Hughes, and individual contributors; MIT License). Forge Gateway follows their
-design — your node builds the template, and the coinbase pays the pool's miners directly — as an
+design (your node builds the template, and the coinbase pays the pool's miners directly) as an
 independent implementation for Bitcoin Cash II and Forge Pool: it contains no DATUM Gateway code
 and does not speak OCEAN's DATUM Protocol. This project is not affiliated with or endorsed by
 OCEAN. See the credits and notices in [LICENSE](LICENSE).
 
-MIT License — see [LICENSE](LICENSE).
+MIT License: see [LICENSE](LICENSE).

@@ -2,9 +2,11 @@ name: Release
 
 # Forge Gateway's source lives in BitcoincashII/forge-solo, where it shares the stratum and TIDES
 # code with Forge Solo; FORGE_SOLO_COMMIT pins the commit a release is built from. Every push and
-# pull request builds and tests that commit. A v* tag also signs the Windows program, in a job only
-# tags reach (the certificate is a secret of the `release` environment), and publishes the release
-# with the version's section of RELEASE_NOTES.md.
+# pull request builds and tests that commit. A pushed v* tag also signs the Windows program, in a
+# job only tags reach (the certificate is a secret of the `release` environment), and publishes
+# the release with the version's section of RELEASE_NOTES.md. The program is signed as Forge
+# Solo's installer is: on the runner with Ubuntu's osslsigncode and an RFC 3161 timestamp, and
+# checked against the certificate's fingerprint before anything is published.
 on:
   push:
     branches: [main]
@@ -14,6 +16,12 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # The Forge Solo signing certificate (CN=BCH2 Software, O=Bitcoin Cash II, C=US, valid until
+  # 2036-08-29), by SHA-256 fingerprint. A program signed by anything else is not published, and
+  # the fingerprint is printed on every release page so a download can be checked against it.
+  SIGNING_CERT_SHA256: '2B:F8:C9:5F:67:AE:32:82:61:C2:59:1B:73:14:11:99:75:C9:E6:CC:C4:5B:4A:00:BF:F5:38:4C:27:09:0C:30'
 
 jobs:
   build:
@@ -25,6 +33,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Read the source commit
         id: src
@@ -40,7 +50,9 @@ jobs:
           repository: BitcoincashII/forge-solo
           ref: ${{ steps.src.outputs.commit }}
           path: src
+          persist-credentials: false
 
+      # The toolchain line of forge-solo's go.mod names the Go version; setup-go reads it.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -83,9 +95,13 @@ jobs:
 
   publish:
     name: Sign and publish the release
-    if: github.ref_type == 'tag'
+    # A pushed v* tag only. A manual run started on a tag would otherwise sign and publish.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
+    # Signing and its checks take a few minutes. A service that never answers must fail the job
+    # well before GitHub's six-hour limit.
+    timeout-minutes: 30
     environment: release
     permissions:
       contents: write   # create the release
@@ -95,6 +111,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Take the build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -102,7 +120,14 @@ jobs:
           name: stage
           path: stage
 
-      # A tag build must not publish an unsigned Windows program.
+      # A tag build must not publish an unsigned Windows program. It is signed with Ubuntu's own
+      # osslsigncode, so the certificate and its password never go into a third-party image. The
+      # password goes in a file, not on the command line. The RFC 3161 timestamp keeps the
+      # signature valid after the certificate expires; a second service is tried if the first
+      # fails or does not answer. osslsigncode itself never gives up on a service that accepts the
+      # connection and then says nothing, so each attempt has a time limit. An attempt that is cut
+      # off can leave a partial signed.exe, which osslsigncode will not overwrite: it is removed
+      # before every attempt.
       - name: Sign the Windows program
         env:
           PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
@@ -113,31 +138,57 @@ jobs:
             echo "::error::WINDOWS_SIGNING_PFX_B64 is not set in the release environment; refusing to publish an unsigned program."
             exit 1
           fi
-          printf '%s' "$PFX_B64" | base64 -d > /tmp/signing.pfx
-          # The signer's container runs as uid 1000; the runner's workspace belongs to uid 1001.
-          chmod a+w .
-          docker run --rm -v "$PWD":/w -v /tmp:/s -w /w --entrypoint osslsigncode amake/innosetup \
-            sign -pkcs12 /s/signing.pfx -pass "$PFX_PASS" \
-            -n "Forge Gateway" -i "https://github.com/${GITHUB_REPOSITORY}" \
-            -h sha256 -in "$EXE" -out "/w/signed.exe"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osslsigncode
+          KEY="$RUNNER_TEMP/signing.pfx" PASS="$RUNNER_TEMP/signing.pass"
+          (umask 077; printf '%s' "$PFX_B64" | base64 -d > "$KEY"; printf '%s\n' "$PFX_PASS" > "$PASS")
+          for tsa in http://timestamp.digicert.com http://timestamp.sectigo.com; do
+            rm -f signed.exe
+            if timeout 120 osslsigncode sign -pkcs12 "$KEY" -readpass "$PASS" \
+                -n "Forge Gateway" -i "https://github.com/${GITHUB_REPOSITORY}" \
+                -h sha256 -ts "$tsa" -in "$EXE" -out signed.exe; then
+              break
+            fi
+            rm -f signed.exe
+          done
+          shred -u "$KEY" "$PASS" 2>/dev/null || rm -f "$KEY" "$PASS"
+          if [ ! -f signed.exe ]; then
+            echo "::error::the program could not be signed and timestamped"
+            exit 1
+          fi
           mv signed.exe "$EXE"
-          shred -u /tmp/signing.pfx 2>/dev/null || rm -f /tmp/signing.pfx
 
-      # Reads the PE certificate table directly rather than trusting the signer's exit code.
-      - name: Verify the signature is present
+      # Checks what will be published, not the signer's exit code:
+      # - the signature verifies against the file;
+      # - it was made by the Forge Solo certificate: osslsigncode compares the signer's own certificate
+      #   with the pinned fingerprint, whatever other certificates the signature carries;
+      # - its timestamp verifies. osslsigncode exits 0 when the timestamp is missing or fails to
+      #   verify, so that line of its report is required.
+      # Checking the timestamp downloads the timestamp service's CRL, so each try has a time limit and
+      # a failed try is repeated.
+      - name: Verify the signature
         run: |
-          python3 - "stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe" <<'EOF'
-          import struct, sys
-          d = open(sys.argv[1], 'rb').read()
-          pe = struct.unpack_from('<I', d, 0x3c)[0]
-          magic = struct.unpack_from('<H', d, pe + 24)[0]
-          dd = pe + 24 + (112 if magic == 0x20b else 96)
-          _, size = struct.unpack_from('<II', d, dd + 4 * 8)   # index 4 = certificate table
-          print(f"certificate table: {size} bytes")
-          if size == 0:
-              print("::error::forge-gateway.exe is not signed")
-              sys.exit(1)
-          EOF
+          EXE="stage/forge-gateway-${V}-windows-amd64/forge-gateway.exe"
+          LEAF="sha256:$(printf '%s' "$SIGNING_CERT_SHA256" | tr -d :)"
+          OUT="$RUNNER_TEMP/verify.txt"
+          osslsigncode extract-signature -in "$EXE" -out "$RUNNER_TEMP/signature.der"
+          openssl pkcs7 -inform DER -in "$RUNNER_TEMP/signature.der" -print_certs -out "$RUNNER_TEMP/signer.pem"
+          ok=
+          for try in 1 2 3; do
+            if timeout 120 osslsigncode verify -in "$EXE" -CAfile "$RUNNER_TEMP/signer.pem" \
+                -TSA-CAfile /etc/ssl/certs/ca-certificates.crt -require-leaf-hash "$LEAF" > "$OUT" 2>&1 &&
+                grep -qx 'Timestamp Server Signature verification: ok' "$OUT"; then
+              ok=1
+            fi
+            cat "$OUT"
+            if [ -n "$ok" ]; then break; fi
+            echo "::warning::try $try: the signature, its certificate or its timestamp did not verify"
+            sleep 15
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::forge-gateway.exe is not signed by Forge Solo's certificate ($SIGNING_CERT_SHA256) with a timestamp that verifies"
+            exit 1
+          fi
 
       # An artifact does not keep the executable bit, so the Linux programs get theirs back here.
       - name: Package
@@ -168,7 +219,7 @@ jobs:
           {
             cat /tmp/changes.md
             printf '\n---\n\n'
-            echo "Built by CI from [BitcoincashII/forge-solo@${SRC:0:12}](https://github.com/BitcoincashII/forge-solo/tree/${SRC}/cmd/forge-gateway); the Windows program is signed. \`SHA256SUMS\` covers the downloads."
+            echo "Built by CI from [BitcoincashII/forge-solo@${SRC:0:12}](https://github.com/BitcoincashII/forge-solo/tree/${SRC}/cmd/forge-gateway). \`forge-gateway.exe\` is signed by the certificate with SHA-256 fingerprint \`${SIGNING_CERT_SHA256}\`. \`SHA256SUMS\` covers the downloads."
           } > /tmp/notes.md
           gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag \
             --title "Forge Gateway ${V}" --notes-file /tmp/notes.md
