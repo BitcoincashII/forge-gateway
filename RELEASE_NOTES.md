@@ -24,10 +24,11 @@ in the taskbar, and its settings in the status page instead of a JSON file.
   it, and removes the firewall rule 1.0.0's guide had you add, which let any program in on port
   3333.
 - **It says what is wrong:** the status page and the tray say when Forge Gateway is not set up, when
-  your node cannot be reached or refuses the login, when it is still syncing, and when Forge Pool
-  cannot be reached. Started from the tray, a wrong node login no longer stops Forge Gateway: fix it
-  in Settings. With a cookie file, Forge Gateway reads the node's new cookie by itself when the
-  node restarts.
+  your node cannot be reached, refuses the login or refuses the PC (its `rpcallowip`), when it is
+  still syncing, when Forge Pool cannot be reached, and when the PC's clock is off, which makes
+  Forge Pool refuse its requests. Started from the tray, a wrong node login no longer stops Forge
+  Gateway: fix it in Settings. With a cookie file, Forge Gateway reads the node's new cookie by
+  itself when the node restarts.
 - **Console and service:** the zip, as before. Started with `SETTINGS_PASSWORD` (16 characters or
   more), the console program has the same Settings. Exit code 3 now means the config or
   `SETTINGS_PASSWORD` is wrong, 4 that a port is taken.

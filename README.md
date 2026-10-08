@@ -79,8 +79,9 @@ PC or on another one on your network.
 
 Right-click the icon for **Open Status Page**, **Copy Settings Password**, **Restart Forge
 Gateway**, **Open Data Folder** and **Quit Forge Gateway**. Its tooltip says what Forge Gateway is
-doing: not set up yet, your node cannot be reached or refuses the login, your node is still
-syncing, Forge Pool cannot be reached, or mining into the TIDES window.
+doing: not set up yet, your node cannot be reached, refuses the login or refuses this PC, your
+node is still syncing, Forge Pool cannot be reached, this PC's clock is off, or mining into the
+TIDES window.
 
 Forge Gateway keeps its files in `%APPDATA%\ForgeGateway`: `forge-gateway.json` (the settings),
 `forge-gateway.key` (this gateway's identity at Forge Pool), `secrets.env` (the settings password)
@@ -104,6 +105,17 @@ the tray.
   node and payout address in Settings, and copy the key as above to keep the gateway's identity.
   The installer also deletes the rule named "Forge Gateway" that 1.0.0's guide added, which let any
   program in on port 3333.
+- **A node on another computer:** in the node's config file add `rpcbind=<the node's address on
+  your network>` and `rpcallowip=<this PC's address>` beside the `127.0.0.1` lines, restart the
+  node, and enter `http://<the node's address>:8342` as the RPC address in Settings.
+- **"Your node refuses this computer":** the node answered HTTP 403, whatever the login: it lets
+  RPC in only from the addresses in its `rpcallowip` lines, and with none of them only at an address
+  given as a number. Add this PC's address as above, or for a node on this PC enter
+  `http://127.0.0.1:8342`, not `localhost`. Typing the password again does not help.
+- **"This PC's clock is ... off":** Forge Pool refuses requests whose time is more than 2 minutes off
+  its own, so Forge Gateway mines solo until the clock is right. Turn on **Set time automatically**
+  in Windows Settings, **Time & language**; Forge Gateway goes back to the pool by itself within a
+  minute.
 
 ## Set up
 
