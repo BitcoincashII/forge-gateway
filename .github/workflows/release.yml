@@ -37,7 +37,7 @@ jobs:
       installer: ${{ steps.tray.outputs.installer }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -50,7 +50,7 @@ jobs:
           echo "commit=$c" >> "$GITHUB_OUTPUT"
 
       - name: Checkout the source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: BitcoincashII/forge-solo
           ref: ${{ steps.src.outputs.commit }}
@@ -189,7 +189,7 @@ jobs:
       SRC: ${{ needs.build.outputs.commit }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -272,7 +272,7 @@ jobs:
       # The installer is compiled again here, from the same forge-solo commit, now with the
       # forge-gateway.exe signed and verified above in it.
       - name: Checkout the source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: BitcoincashII/forge-solo
           ref: ${{ needs.build.outputs.commit }}
