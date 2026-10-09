@@ -338,12 +338,12 @@ jobs:
         run: |
           EXE="src/windows/gateway/ForgeGateway-Setup-${V}.exe"
           LEAF="sha256:$(printf '%s' "$SIGNING_CERT_SHA256" | tr -d :)"
-          OUT="$RUNNER_TEMP/verify.txt"
-          osslsigncode extract-signature -in "$EXE" -out "$RUNNER_TEMP/signature.der"
-          openssl pkcs7 -inform DER -in "$RUNNER_TEMP/signature.der" -print_certs -out "$RUNNER_TEMP/signer.pem"
+          OUT="$RUNNER_TEMP/installer-verify.txt"
+          osslsigncode extract-signature -in "$EXE" -out "$RUNNER_TEMP/installer-signature.der"
+          openssl pkcs7 -inform DER -in "$RUNNER_TEMP/installer-signature.der" -print_certs -out "$RUNNER_TEMP/installer-signer.pem"
           ok=
           for try in 1 2 3; do
-            if timeout 120 osslsigncode verify -in "$EXE" -CAfile "$RUNNER_TEMP/signer.pem" \
+            if timeout 120 osslsigncode verify -in "$EXE" -CAfile "$RUNNER_TEMP/installer-signer.pem" \
                 -TSA-CAfile /etc/ssl/certs/ca-certificates.crt -require-leaf-hash "$LEAF" > "$OUT" 2>&1 &&
                 grep -qx 'Timestamp Server Signature verification: ok' "$OUT"; then
               ok=1
