@@ -274,15 +274,43 @@ when a listen address is taken, 1 for anything else.
 Forge Gateway's source is in [BitcoincashII/forge-solo](https://github.com/BitcoincashII/forge-solo/tree/main/cmd/forge-gateway),
 where it shares the stratum and TIDES code with Forge Solo's TIDES mode; its Windows installer and
 tray app are in `windows/gateway` there. Each release is built from the forge-solo commit in
-[`FORGE_SOLO_COMMIT`](FORGE_SOLO_COMMIT), and its release page says which. To build it yourself,
-with Go (the version in forge-solo's `go.mod`):
+[`FORGE_SOLO_COMMIT`](FORGE_SOLO_COMMIT), and its release page says which.
+
+To build it yourself you need Git, curl and Go 1.21 or newer, and Docker for the Windows installer.
+forge-solo's `go.mod` names the Go the releases are built with (its `toolchain` line), and an older
+Go downloads that one by itself. `V` is the release to build: `FORGE_SOLO_COMMIT` at its tag names
+its commit. These are the release workflow's commands (`.github/workflows/release.yml` here);
+`-X main.version` sets the version `forge-gateway -version` prints, and `GOARCH=arm64` builds for
+64-bit ARM:
 
 ```
+V=1.1.0
 git clone https://github.com/BitcoincashII/forge-solo && cd forge-solo
-git checkout <the commit in FORGE_SOLO_COMMIT>
-go build -trimpath -o forge-gateway ./cmd/forge-gateway
-GOOS=windows GOARCH=amd64 go build -trimpath -o forge-gateway.exe ./cmd/forge-gateway
+git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway.exe ./cmd/forge-gateway
 ```
+
+The Windows installer is built in the same checkout, from `windows/gateway/bin`: the tray app,
+`forge-gateway.exe` and this repository's LICENSE. Inno Setup compiles it in Docker, with no
+network, in the image the release workflow pins (`INNOSETUP_IMAGE`). The image runs as uid 1000,
+so its folder is made writable for it, as the release does:
+
+```
+go install github.com/akavel/rsrc@v0.10.2
+(cd windows/gateway/launcher && "$(go env GOPATH)/bin/rsrc" -ico forge-gateway.ico -arch amd64 -o rsrc.syso)
+mkdir -p windows/gateway/bin
+(cd windows/gateway/launcher && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-H=windowsgui -s -w -X main.version=$V" -o ../bin/forge-gateway-tray.exe .)
+cp forge-gateway.exe windows/gateway/bin/
+curl -fsSL -o windows/gateway/bin/LICENSE.txt https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/LICENSE
+chmod a+w windows/gateway
+docker run --rm --network none -v "$PWD":/work amake/innosetup:innosetup6@sha256:81713b854eb12278021045dcb57701fe35312030b2dc1d37710184f294a23f81 "/DMyAppVersion=$V" windows/gateway/forge-gateway.iss
+```
+
+The installer is `windows/gateway/ForgeGateway-Setup-<version>.exe`. A release signs
+`forge-gateway.exe` before it goes in, and the installer after; a build of your own is not signed.
+[windows/gateway/README.md](https://github.com/BitcoincashII/forge-solo/blob/main/windows/gateway/README.md)
+in forge-solo says more about the tray app and the installer.
 
 ## Credits
 
