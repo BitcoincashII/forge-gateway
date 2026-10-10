@@ -3,6 +3,34 @@
 Each section is the release page text for that version. A `v<version>` tag in this repository
 builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
+## 1.1.1
+
+Forge Gateway now credits a mistyped address as a worker name in every form, and its status page
+and tray say only what is so. It is built from Forge Solo 1.0.14's source, forge-solo commit
+`<<PLACEHOLDER: the FORGE_SOLO_COMMIT set after Forge Solo 1.0.14 is merged>>`.
+
+- **A mistyped address is a worker name, with or without its prefix.** A username that is a BCH2
+  address without the `bitcoincashii:` prefix, or with the `bitcoinii:` one some miners send, is
+  now checked as one with the prefix is. Before, a mistyped one was taken as an address: the
+  gateway sent that miner's shares to the pool under it, the pool refused every one, and the work
+  was credited to no one. Now it is a worker name, credited to the payout address, as a mistyped
+  address with the prefix already was. Keep the `bitcoincashii:` prefix all the same.
+- **What a block pays:** the status page said every block pays Forge Pool's TIDES split. A block
+  found on work the pool registered does; one found while mining solo pays your payout address in
+  full, and the page now says so.
+- **When the pool refuses:** a pool that answers but will not take your node's work was reported
+  as one that cannot be reached. The status page now says Forge Pool cannot be reached, or will not
+  take your node's work; the tray says Forge Pool is unavailable; and the Pool only note in
+  Settings covers both.
+- **Miners on other devices:** with no shares yet, the status page says whom a username is
+  credited to, and that on Windows, miners on other devices can connect only while the PC's network
+  profile is Private. Setup's Ready page says the same before it adds the firewall rule.
+- **The log:** the payout address's public key hash no longer goes straight to the console (and so,
+  on Windows, into `forge-gateway.log`) at every start and settings change. It is in the gateway's
+  own log, at debug level.
+- **Built with Go 1.27.2** instead of 1.26.8: it has security fixes to Go's crypto/tls,
+  html/template, net/http, net/textproto and os packages.
+
 ## 1.1.0
 
 Forge Gateway for Windows now installs and runs like Forge Solo for Windows: an installer, an icon
