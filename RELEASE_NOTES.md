@@ -7,7 +7,7 @@ builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
 Forge Gateway now credits a mistyped address as a worker name in every form, and an address with a
 worker name straight after it to that address; its status page and tray say only what is so. It
-is built from Forge Solo 1.0.14's source.
+is built from Forge Solo 1.0.15's source.
 
 - **A mistyped address is a worker name, with or without its prefix.** A username that is a BCH2
   address without the `bitcoincashii:` prefix, or with the `bitcoinii:` one some miners send, is
@@ -37,7 +37,8 @@ is built from Forge Solo 1.0.14's source.
   on Windows, into `forge-gateway.log`) at every start and settings change. It is in the gateway's
   own log, at debug level.
 - **Built with Go 1.27.2** instead of 1.26.8: it has security fixes to Go's crypto/tls,
-  html/template, net/http, net/textproto and os packages.
+  html/template, net/http, net/textproto and os packages. On Windows, `forge-gateway.exe` and the
+  tray app are built with golang.org/x/sys 0.49.0 instead of 0.48.0.
 
 ## 1.1.0
 
