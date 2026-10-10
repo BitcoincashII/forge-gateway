@@ -7,8 +7,7 @@ builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
 Forge Gateway now credits a mistyped address as a worker name in every form, and an address with a
 worker name straight after it to that address; its status page and tray say only what is so. It
-is built from Forge Solo 1.0.14's source, forge-solo commit
-`<<PLACEHOLDER: the FORGE_SOLO_COMMIT set after Forge Solo 1.0.14 is merged>>`.
+is built from Forge Solo 1.0.14's source.
 
 - **A mistyped address is a worker name, with or without its prefix.** A username that is a BCH2
   address without the `bitcoincashii:` prefix, or with the `bitcoinii:` one some miners send, is
