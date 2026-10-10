@@ -199,16 +199,19 @@ netsh advfirewall firewall add rule name="Forge Gateway" dir=in action=allow pro
 | Username | your BCH2 address, optionally with `.workername`; or just a worker name |
 | Password | anything (`x`) |
 
-A username that is a BCH2 address (`bitcoincashii:q…`, with or without `.workername` after it) is
-credited to **that address** at the pool; any other username, a legacy `1…` address included, is
-credited to the gateway's `payout_address`, with the username as the worker name. So one gateway
-can serve several people, each paid to their own address by DATUM blocks; a block found while the
-gateway mines solo pays only its `payout_address` (see [How you are paid](#how-you-are-paid)). An
-address with a typo in it is not an address, with or without its `bitcoincashii:` prefix, so it
-counts as a worker name: the gateway's log says, at each miner's login, which address it is
-credited to. Keep the `bitcoincashii:` prefix all the same: Forge Gateway 1.1.0 and older take a
-mistyped address without it as an address, and the pool refuses that miner's shares, so its work
-is credited to no one.
+A username that is a BCH2 address (`bitcoincashii:q…`), with or without a worker name after it
+(`.workername`, or the name straight after the address with no dot), is credited to **that
+address** at the pool; any other username, a legacy `1…` address included, is credited to the
+gateway's `payout_address`, with the username as the worker name. So one gateway can serve several
+people, each paid to their own address by DATUM blocks; a block found while the gateway mines solo
+pays only its `payout_address` (see [How you are paid](#how-you-are-paid)). An address with a typo
+in it is not an address, with or without its `bitcoincashii:` prefix, so it counts as a worker
+name: the gateway's log says, at each miner's login, which address it is credited to.
+
+Forge Gateway 1.1.0 and older differ in two ways. They credit `bitcoincashii:q…` with a worker name
+straight after it to `payout_address`, with the whole username as the worker name. And they take a
+mistyped address without its prefix as an address: the pool refuses that miner's shares, so its
+work is credited to no one. Keep the `bitcoincashii:` prefix all the same.
 
 ## Status page
 
@@ -276,7 +279,7 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `node.rpc_user`, `node.rpc_password` | required (or the cookie file) | RPC login |
 | `node.rpc_cookie_file` | (none) | read the login from the node's `.cookie` instead |
 | `mining.payout_address` | required | credited for worker-name logins; paid solo blocks |
-| `mining.coinbase_tag` | `Forge Gateway` | text in your blocks' coinbase: up to 24 printable ASCII characters |
+| `mining.coinbase_tag` | `Forge Gateway` | text in your blocks' coinbase: up to 24 printable ASCII characters (a longer one is cut to 24; over 32 is refused) |
 | `mining.pool_only` | `false` | turn miners away instead of mining solo while the pool cannot be reached or will not take your node's work |
 | `stratum.listen` | `0.0.0.0:3333` | where miners connect |
 | `stratum.min_difficulty` | `1024` | lowest share difficulty a miner is given |

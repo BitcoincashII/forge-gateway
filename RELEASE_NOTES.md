@@ -5,8 +5,9 @@ builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
 ## 1.1.1
 
-Forge Gateway now credits a mistyped address as a worker name in every form, and its status page
-and tray say only what is so. It is built from Forge Solo 1.0.14's source, forge-solo commit
+Forge Gateway now credits a mistyped address as a worker name in every form, and an address with a
+worker name straight after it to that address; its status page and tray say only what is so. It
+is built from Forge Solo 1.0.14's source, forge-solo commit
 `<<PLACEHOLDER: the FORGE_SOLO_COMMIT set after Forge Solo 1.0.14 is merged>>`.
 
 - **A mistyped address is a worker name, with or without its prefix.** A username that is a BCH2
@@ -15,6 +16,10 @@ and tray say only what is so. It is built from Forge Solo 1.0.14's source, forge
   gateway sent that miner's shares to the pool under it, the pool refused every one, and the work
   was credited to no one. Now it is a worker name, credited to the payout address, as a mistyped
   address with the prefix already was. Keep the `bitcoincashii:` prefix all the same.
+- **An address with a worker name straight after it** (`bitcoincashii:q…rig1`, with no dot) is now
+  credited to that address, with `rig1` as the worker name. 1.1.0 credited it to the payout
+  address, with the whole username as the worker name. Without the prefix, such a username was
+  already credited to its address.
 - **What a block pays:** the status page said every block pays Forge Pool's TIDES split. A block
   found on work the pool registered does; one found while mining solo pays your payout address in
   full, and the page now says so.
@@ -24,7 +29,7 @@ and tray say only what is so. It is built from Forge Solo 1.0.14's source, forge
   Settings covers both.
 - **Miners on other devices:** with no shares yet, the status page says whom a username is
   credited to, and that on Windows, miners on other devices can connect only while the PC's network
-  profile is Private. Setup's Ready page says the same before it adds the firewall rule.
+  profile is Private or Domain. Setup's Ready page says the same before it adds the firewall rule.
 - **The log:** the payout address's public key hash no longer goes straight to the console (and so,
   on Windows, into `forge-gateway.log`) at every start and settings change. It is in the gateway's
   own log, at debug level.
@@ -73,12 +78,10 @@ The first release of **Forge Gateway**: mine into Forge Pool's TIDES window from
 node, without Forge Solo. It is built from Forge Solo 1.0.13's source.
 
 Your node builds every block template, your miners connect to the gateway, and Forge Pool
-registers each job and counts your miners' shares. Every block found on a job Forge Pool
-registered, by a Forge Gateway or by a Forge Solo in TIDES mode, pays everyone with work in the
-TIDES window, straight from its coinbase: no pool fee and no payout threshold; only amounts under
-546 satoshis wait for a later block. A block found while mining solo pays the payout address in
-full. It is the same gateway as Forge Solo's TIDES mode, on its own, for people who run their own
-node and their own mining setup.
+registers each job and counts your miners' shares. Every block found by a Forge Gateway or by a
+Forge Solo in TIDES mode pays everyone with work in the TIDES window, straight from its coinbase:
+no pool fee, no pool balance, no minimum payout. It is the same gateway as Forge Solo's TIDES mode,
+on its own, for people who run their own node and their own mining setup.
 
 - **Downloads:** Linux (x86_64 and arm64, with a systemd unit) and Windows (x86_64, signed;
   `forge-gateway.exe install` sets it up as a Windows service). Each holds the program, its
