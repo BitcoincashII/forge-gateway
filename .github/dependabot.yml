@@ -1,6 +1,10 @@
 version: 2
+# A week's updates of the actions come in one pull request, not one for each action.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
