@@ -80,7 +80,7 @@ PC or on another one on your network.
 Right-click the icon for **Open Status Page**, **Copy Settings Password**, **Restart Forge
 Gateway**, **Open Data Folder** and **Quit Forge Gateway**. Its tooltip says what Forge Gateway is
 doing: not set up yet, your node cannot be reached, refuses the login or refuses this PC, your
-node is still syncing, Forge Pool cannot be reached, this PC's clock is off, or mining into the
+node is still syncing, Forge Pool is unavailable, this PC's clock is off, or mining into the
 TIDES window.
 
 Forge Gateway keeps its files in `%APPDATA%\ForgeGateway`: `forge-gateway.json` (the settings),
@@ -195,11 +195,12 @@ netsh advfirewall firewall add rule name="Forge Gateway" dir=in action=allow pro
 | Username | your BCH2 address, optionally with `.workername`; or just a worker name |
 | Password | anything (`x`) |
 
-A username that is a BCH2 address is credited to **that address** at the pool; any other username
-is credited to the gateway's `payout_address`, with the username as the worker name. So one
-gateway can serve several people, each paid to their own address. An address with a typo in it is
-not an address, so it counts as a worker name: the gateway's log says, at each miner's login,
-which address it is credited to.
+A username that is a BCH2 address is credited to **that address** at the pool; any other username,
+a legacy `1…` address included, is credited to the gateway's `payout_address`, with the username
+as the worker name. So one gateway can serve several people, each paid to their own address. An
+address with a typo in it is not an address, with or without its `bitcoincashii:` prefix, so it
+counts as a worker name: the gateway's log says, at each miner's login, which address it is
+credited to.
 
 ## Status page
 
@@ -257,7 +258,7 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `stratum.target_share_seconds` | `5` | vardiff aims for a share this often per miner |
 | `stratum.retarget_seconds` | `10` | how often vardiff may adjust |
 | `stratum.max_connections` | `256` | connections in total |
-| `stratum.max_connections_per_ip` | `128` | connections from one address |
+| `stratum.max_connections_per_ip` | half of `max_connections` (`128`) | connections from one address |
 | `pool.url` | `https://pool.bch2.org` | Forge Pool. Must be `https://`: the pool's answers carry the payout split (plain `http://` only for a pool on this machine) |
 | `pool.key_file` | `forge-gateway.key` | this gateway's identity at the pool, created on first start; keep it |
 | `status.listen` | `127.0.0.1:3090` | status page; `off` disables it |
