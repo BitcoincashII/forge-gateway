@@ -26,6 +26,10 @@ is built from Forge Solo 1.0.14's source.
   as one that cannot be reached. The status page now says Forge Pool cannot be reached, or will not
   take your node's work; the tray says Forge Pool is unavailable; and the Pool only note in
   Settings covers both.
+- **"Cannot reach your node" for 10 seconds:** about 2 minutes after Forge Gateway started, the
+  status page and the tray said for 10 seconds that it could not reach your node, and the log had
+  a warning ending in `EOF`. They no longer do: the node closes a connection left unused for 30
+  seconds, and Forge Gateway now closes its own after 20, before the node does.
 - **Miners on other devices:** with no shares yet, the status page says whom a username is
   credited to, and that on Windows, miners on other devices can connect only while the PC's network
   profile is Private or Domain. Setup's Ready page says the same before it adds the firewall rule.
