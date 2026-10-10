@@ -45,10 +45,12 @@ The first release of **Forge Gateway**: mine into Forge Pool's TIDES window from
 node, without Forge Solo. It is built from Forge Solo 1.0.13's source.
 
 Your node builds every block template, your miners connect to the gateway, and Forge Pool
-registers each job and counts your miners' shares. Every block found by a Forge Gateway or by a
-Forge Solo in TIDES mode pays everyone with work in the TIDES window, straight from its coinbase:
-no pool fee, no pool balance, no minimum payout. It is the same gateway as Forge Solo's TIDES mode,
-on its own, for people who run their own node and their own mining setup.
+registers each job and counts your miners' shares. Every block found on a job Forge Pool
+registered, by a Forge Gateway or by a Forge Solo in TIDES mode, pays everyone with work in the
+TIDES window, straight from its coinbase: no pool fee and no payout threshold; only amounts under
+546 satoshis wait for a later block. A block found while mining solo pays the payout address in
+full. It is the same gateway as Forge Solo's TIDES mode, on its own, for people who run their own
+node and their own mining setup.
 
 - **Downloads:** Linux (x86_64 and arm64, with a systemd unit) and Windows (x86_64, signed;
   `forge-gateway.exe install` sets it up as a Windows service). Each holds the program, its

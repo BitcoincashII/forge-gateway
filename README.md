@@ -3,11 +3,14 @@
 Mine into **Forge Pool's TIDES window from your own BCH2 node**, without Forge Solo.
 
 Your node builds every block template. Your miners connect to Forge Gateway. Forge Pool registers
-each job and counts the shares your miners find, and every block found through the pool's DATUM
-gateways pays its TIDES split **straight from the coinbase**: no pool fee, no pool balance, no
-minimum payout.
-If Forge Pool cannot be reached, the gateway keeps your miners busy mining solo on your node (or,
-with `pool_only`, sends them to their backup pool) and rejoins by itself when the pool is back.
+each job and credits the shares your miners find that reach the job's share difficulty. Every
+block found on a job Forge Pool registered (a DATUM block), by any Forge Gateway or Forge Solo in
+TIDES mode, pays its TIDES split **straight from the coinbase**: no pool fee and no payout
+threshold; only amounts under 546 satoshis wait for a later block.
+If Forge Pool cannot be reached, or will not take your node's work, the gateway keeps your miners
+busy mining solo on your node, and a block found then pays only your payout address (with
+`pool_only`, it sends them to their backup pool instead). It rejoins by itself when the pool takes
+its work again.
 
 Forge Solo's TIDES mode is the same gateway, built in. Use Forge Gateway when you run your own
 node and your own mining setup instead.
@@ -65,7 +68,8 @@ PC or on another one on your network.
    **Yes**. That adds one firewall rule, for port 3333 on private and domain networks, that lets
    in `forge-gateway.exe` only. For miners on other devices, set your network to **Private**: in
    Windows Settings, under **Network & internet**, open your connection's properties and set its
-   network profile to Private. Windows 11 makes new networks Public.
+   network profile to Private. Windows 11 makes new networks Public, and neither the tray nor the
+   status page can tell when that keeps your miners out.
 3. Forge Gateway starts, puts its icon in the notification area of the taskbar, and opens its
    status page at **Settings**. Enter your node's RPC address and login (its RPC user and
    password, or the full path of its `.cookie` file) and your BCH2 payout address. To save,
@@ -113,9 +117,9 @@ the tray.
   given as a number. Add this PC's address as above, or for a node on this PC enter
   `http://127.0.0.1:8342`, not `localhost`. Typing the password again does not help.
 - **"This PC's clock is ... off":** Forge Pool refuses requests whose time is more than 2 minutes off
-  its own, so Forge Gateway mines solo until the clock is right. Turn on **Set time automatically**
-  in Windows Settings, **Time & language**; Forge Gateway goes back to the pool by itself within a
-  minute.
+  its own, so Forge Gateway mines solo (with Pool only on, turns miners away) until the clock is
+  right. Turn on **Set time automatically** in Windows Settings, **Time & language**; Forge
+  Gateway goes back to the pool by itself within a minute.
 
 ## Set up
 
@@ -195,48 +199,70 @@ netsh advfirewall firewall add rule name="Forge Gateway" dir=in action=allow pro
 | Username | your BCH2 address, optionally with `.workername`; or just a worker name |
 | Password | anything (`x`) |
 
-A username that is a BCH2 address is credited to **that address** at the pool; any other username,
-a legacy `1…` address included, is credited to the gateway's `payout_address`, with the username
-as the worker name. So one gateway can serve several people, each paid to their own address. An
+A username that is a BCH2 address (`bitcoincashii:q…`, with or without `.workername` after it) is
+credited to **that address** at the pool; any other username, a legacy `1…` address included, is
+credited to the gateway's `payout_address`, with the username as the worker name. So one gateway
+can serve several people, each paid to their own address by DATUM blocks; a block found while the
+gateway mines solo pays only its `payout_address` (see [How you are paid](#how-you-are-paid)). An
 address with a typo in it is not an address, with or without its `bitcoincashii:` prefix, so it
 counts as a worker name: the gateway's log says, at each miner's login, which address it is
-credited to.
+credited to. Keep the `bitcoincashii:` prefix all the same: Forge Gateway 1.1.0 and older take a
+mistyped address without it as an address, and the pool refuses that miner's shares, so its work
+is credited to no one.
 
 ## Status page
 
 Open `http://127.0.0.1:3090/` on the gateway machine: the pool connection, your node, what a block
-found now would pay you, each worker's hashrate, and blocks found. The same data is at
-`/api/status` as JSON. It has no login, so it listens on this machine only; set `status.listen`
-to `0.0.0.0:3090` only on a network you trust.
+found now would pay your payout address, each worker's hashrate and the address it is credited
+to, and blocks found. The same data is at `/api/status` as JSON. It has no login, so it listens on
+this machine only; set `status.listen` to `0.0.0.0:3090` only on a network you trust.
 
-It has a Settings panel for the node, the payout address, the coinbase tag and pool only. Forge
-Gateway started with `SETTINGS_PASSWORD` (16 characters or more; the Windows tray app does this)
-saves them with that password, and they take effect at once. Started without it, the panel only
-shows them: edit `forge-gateway.json` and restart.
+It has a Settings panel for the node, the payout address, the coinbase tag and pool only. It works
+only in a page opened on the gateway machine itself, at `127.0.0.1` or `localhost`. Forge Gateway
+started with `SETTINGS_PASSWORD` (16 characters or more; the Windows tray app does this) saves them
+with that password, and they take effect at once. Started without it, the panel only shows them:
+edit `forge-gateway.json` and restart.
 
 To start on a new block the moment your node has it (instead of within a second), add to the
 node's config: `blocknotify=curl -s -X POST http://127.0.0.1:3090/notify`
 
 ## How you are paid
 
-Forge Pool's TIDES window is the most recent shares from every DATUM gateway: Forge Gateways and
-Forge Solo installs in TIDES mode. Every block any of them finds, yours included, pays each
-address in the window its share of the reward, directly in that block's coinbase. (Blocks found
-by the pool's own stratum miners are paid by the pool's usual payouts, not this window.) The
-payout reaches your address when the block is mined, and can be spent after the usual 100-block
-coinbase maturity.
+Forge Pool's TIDES window holds up to 8 × the network difficulty (of the block being mined) of the
+most recent credited share work, from all gateways together: Forge Gateways and Forge Solo
+installs in TIDES mode. Your part of it is your work in it divided by all the work in it.
 
-Each job commits to a share difficulty above the highest any of your miners is on (the power of
-two at or above twice it, never above the network's). Only the shares that reach it go to the
-pool, which credits each at that difficulty, so your miners' work counts in full on average; the
-status page shows both counts.
+A block found on a job Forge Pool registered (a DATUM block), by your gateway or anyone else's,
+pays each address in the window its part of the block's value (the subsidy plus the fees of the
+transactions in it), plus any amount carried for it, directly in that block's coinbase. There is
+no pool fee. Amounts under 546 satoshis get no output: they are carried forward and paid in a
+later DATUM block in which the address has work in the window and is due at least 546 satoshis.
+Blocks found by miners on the pool's own stratum ports are paid by the pool's usual payouts, not
+from this window.
+
+The payout is an output of the block itself, and can be spent 100 blocks after it (the network's
+coinbase maturity rule). Forge Pool counts a DATUM block as confirmed at 2 confirmations and checks
+it until its coinbase can be spent: one that drops off the chain is marked orphaned, pays nothing,
+and its effect on carried amounts is undone. Forge Pool's
+[TIDES guide](https://pool.bch2.org/tides-guide.html) has the details, and its
+[TIDES page](https://pool.bch2.org/tides) shows the window.
+
+Each job's share difficulty is the higher of the pool's own difficulty for your gateway and the one
+the job commits to: the power of two at or above twice the highest difficulty your miners work at,
+never above the network difficulty. A difficulty a miner sets itself (`d=` in its password) counts
+once it has sent a share at it. A miner that connects, or whose difficulty rises, is covered from
+the next job, within about 15 seconds. Only the shares that reach the job's share difficulty go to
+the pool, which credits each at that difficulty, so each miner's work counts in full on average;
+the status page shows both counts.
 
 While Forge Pool cannot be reached, or will not take your node's work (your node is still
-catching up after a restart, say), the gateway mines **solo**: a block found then pays your
-`payout_address` the whole reward. It tries the pool again every minute and moves your miners
-back as soon as the pool takes its work. With `"pool_only": true` it turns miners away instead,
-so they fail over to their backup pool; set that on a gateway that serves other people's
-addresses, because a solo block pays only `payout_address`.
+catching up after a restart, say), the gateway mines **solo**: a block found then is not a DATUM
+block, and pays your `payout_address` the whole reward. A job the pool already took stays in use
+while it cannot be refreshed, until it is 45 seconds to about a minute old. The gateway tries the
+pool again every minute and moves your miners back as soon as the pool takes its work. With
+`"pool_only": true` (**Pool only** in Settings) it turns miners away instead, so they fail over to
+their backup pool; set that on a gateway that serves other people's addresses, because a solo
+block pays only `payout_address`.
 
 ## Config reference
 
@@ -250,8 +276,8 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `node.rpc_user`, `node.rpc_password` | required (or the cookie file) | RPC login |
 | `node.rpc_cookie_file` | (none) | read the login from the node's `.cookie` instead |
 | `mining.payout_address` | required | credited for worker-name logins; paid solo blocks |
-| `mining.coinbase_tag` | `Forge Gateway` | text in your blocks' coinbase, up to 32 characters |
-| `mining.pool_only` | `false` | turn miners away instead of mining solo while the pool is down |
+| `mining.coinbase_tag` | `Forge Gateway` | text in your blocks' coinbase: up to 24 printable ASCII characters |
+| `mining.pool_only` | `false` | turn miners away instead of mining solo while the pool cannot be reached or will not take your node's work |
 | `stratum.listen` | `0.0.0.0:3333` | where miners connect |
 | `stratum.min_difficulty` | `1024` | lowest share difficulty a miner is given |
 | `stratum.max_difficulty` | `1e12` | highest |
@@ -262,13 +288,13 @@ misspelt key is an error, not silently ignored. Relative paths are relative to t
 | `pool.url` | `https://pool.bch2.org` | Forge Pool. Must be `https://`: the pool's answers carry the payout split (plain `http://` only for a pool on this machine) |
 | `pool.key_file` | `forge-gateway.key` | this gateway's identity at the pool, created on first start; keep it |
 | `status.listen` | `127.0.0.1:3090` | status page; `off` disables it |
-| `log_file` | console (a Windows service: `forge-gateway.log`) | where the log goes. A log file is kept under 20 MB; the older part moves to `<file>.1` |
+| `log_file` | console (a Windows service: `forge-gateway.log` next to the config) | where the log goes. A log file is kept under 20 MB; the older part moves to `<file>.1` |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` |
 
 The installer's Forge Gateway keeps this file in `%APPDATA%\ForgeGateway`, and Settings writes its
 node and mining keys. A `bitcoincashii:p...` payout address is refused: the gateway pays only
 `bitcoincashii:q...` addresses. Exit codes: 3 when the config or `SETTINGS_PASSWORD` is wrong, 4
-when a listen address is taken, 1 for anything else.
+when a listen address is taken, 1 for anything else; `-check` exits 1 on any problem.
 
 ## Source
 
@@ -285,7 +311,7 @@ its commit. These are the release workflow's commands (`.github/workflows/releas
 64-bit ARM:
 
 ```
-V=1.1.0
+V=1.1.1
 git clone https://github.com/BitcoincashII/forge-solo && cd forge-solo
 git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway
