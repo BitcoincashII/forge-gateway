@@ -33,6 +33,8 @@ The zip and the Linux downloads each hold the program, this README, the license 
 `forge-gateway.example.json`; the Linux ones also hold `forge-gateway.service`. Check your
 download against `SHA256SUMS`.
 
+There is no Mac download: on a Mac, [build it yourself](#on-a-mac-build-it-yourself).
+
 ## What you need
 
 - A fully synced **Bitcoin Cash II node** on mainnet with RPC enabled.
@@ -190,6 +192,178 @@ local network, from the same Administrator prompt:
 ```
 netsh advfirewall firewall add rule name="Forge Gateway" dir=in action=allow protocol=TCP localport=3333 profile=private,domain
 ```
+
+## On a Mac (build it yourself)
+
+There is no Mac download. On a Mac you build Forge Gateway from its source and sign it yourself,
+ad hoc, as Bitcoin Cash II's own Mac app is signed. You need macOS 13 Ventura or later, on Apple
+silicon or Intel, and what is in [What you need](#what-you-need). These steps put Forge Gateway in
+`~/ForgeGateway` and its source in `~/forge-solo`. Type the commands in Terminal.
+
+### Tools
+
+Install Apple's command line tools, which bring `git`. If they are installed already, it says so.
+
+```
+xcode-select --install
+```
+
+Then install Go: the `.pkg` from [go.dev/dl](https://go.dev/dl/) (Apple macOS, ARM64 for Apple
+silicon, x86-64 for an Intel Mac), or `brew install go` if you use Homebrew. Open a new Terminal
+window afterwards. Any Go 1.21 or newer will do: the `GOTOOLCHAIN` line below has Go build with the
+version the release is built with, which the `toolchain` line of forge-solo's `go.mod` names
+(go1.27.2 for 1.1.1), and Go downloads that version by itself if it is not the one you installed.
+
+### Build and sign
+
+`V` is the release to build: `FORGE_SOLO_COMMIT` at its tag names the forge-solo commit it is
+built from, and the `go build` line is the release workflow's.
+
+<!-- mac-build:start -->
+```
+V=1.1.1
+git clone https://github.com/BitcoincashII/forge-solo ~/forge-solo
+cd ~/forge-solo
+git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
+export GOTOOLCHAIN="$(sed -n 's/^toolchain //p' go.mod)"
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway
+codesign --force --sign - --identifier org.bitcoincashii.forge-gateway forge-gateway
+codesign --verify --strict --verbose=2 forge-gateway
+./forge-gateway -version
+mkdir -p ~/ForgeGateway
+rm -f ~/ForgeGateway/forge-gateway
+cp forge-gateway cmd/forge-gateway/forge-gateway.example.json ~/ForgeGateway/
+```
+<!-- mac-build:end -->
+
+`codesign --sign -` signs ad hoc: with no certificate, the signature seals the program's exact
+bytes. Go already signs a program for Apple silicon that way, under the name `a.out`, and does not
+sign one for an Intel Mac at all. `codesign` signs both the same way under Forge Gateway's own
+name, `org.bitcoincashii.forge-gateway`, as Bitcoin Cash II's Mac app is signed under
+`org.bitcoincashII.BitcoinCashII-Qt`. Run it again after anything changes the file. The check
+prints `forge-gateway: valid on disk` and `forge-gateway: satisfies its Designated Requirement`,
+and `-version` prints `forge-gateway 1.1.1`.
+
+A program you build yourself is not quarantined as a download is, so Gatekeeper lets it run
+without Apple's notarization. The `rm` matters when you update: macOS can kill a program copied
+over one that has run, because it keeps what it knew of the old one's signature.
+
+### Your BCH2 node
+
+Bitcoin Cash II's Mac download is its BitcoinCashII-Qt app. Its `bitcoincashIId` you build
+yourself, as the [macOS steps in BCH2's README](https://github.com/BitcoincashII/bitcoincashII-core/blob/v27.0.2/README.md#macos)
+say. Both keep their files in `~/Library/Application Support/Bitcoin Cash II` unless you chose
+another folder (BCH2's README says `BitcoinCashII`; version 27.0.2 uses `Bitcoin Cash II`). Turn
+its RPC on in its config file there, `bitcoincashII.conf`:
+
+<!-- mac-build:start -->
+```
+mkdir -p ~/Library/Application\ Support/Bitcoin\ Cash\ II
+echo server=1 >> ~/Library/Application\ Support/Bitcoin\ Cash\ II/bitcoincashII.conf
+```
+<!-- mac-build:end -->
+
+Then quit the node and start it again. The app answers RPC only with `server=1`; `bitcoincashIId`
+does without it. Unless its config sets `rpcpassword`, the node writes a new login to the `.cookie`
+file in that folder each time it starts, and deletes it when it stops. Forge Gateway reads it from
+there.
+
+### Configure
+
+```
+cd ~/ForgeGateway
+cp forge-gateway.example.json forge-gateway.json
+echo "$HOME/Library/Application Support/Bitcoin Cash II/.cookie"
+nano forge-gateway.json
+```
+
+Set `node.rpc_user` and `node.rpc_password` to `""`, `node.rpc_cookie_file` to the path `echo`
+printed (written out in full: the config does not expand `~`), and `mining.payout_address` to your
+`bitcoincashii:q…` address. With `rpcuser` and `rpcpassword` in the node's config, set those two
+instead and leave the cookie file `""`. Save with Control-O and Return, and quit with Control-X.
+With the cookie, the node's part reads:
+
+```
+  "node": {
+    "rpc_url": "http://127.0.0.1:8342",
+    "rpc_user": "",
+    "rpc_password": "",
+    "rpc_cookie_file": "/Users/you/Library/Application Support/Bitcoin Cash II/.cookie"
+  },
+```
+
+### Check and run
+
+```
+./forge-gateway -check -config forge-gateway.json
+./forge-gateway -config forge-gateway.json
+```
+
+`-check` checks the config, logs in to your node and asks Forge Pool for its TIDES window. It also
+creates `forge-gateway.key` in `~/ForgeGateway`: this gateway's identity at the pool. With the node
+not running, or running without `server=1`, it says
+`✗ node login: node.rpc_cookie_file: open ...: no such file or directory` (there is no cookie), or
+with a user and password, `✗ node http://127.0.0.1:8342: ... connection refused`.
+
+The second line runs Forge Gateway in this Terminal window until you press Control-C; it then
+closes your miners' connections and sends Forge Pool the shares it still holds. Its status page is
+`http://127.0.0.1:3090/`. Point your miners at `stratum+tcp://<the Mac's address>:3333`: the
+address is under **Details** of your connection in System Settings, **Network**. A Mac that sleeps
+stops your miners; `sudo pmset -c sleep 0` keeps it awake while it is on power.
+
+If the macOS firewall is on (System Settings, **Network**, **Firewall**), macOS asks the first time
+Forge Gateway waits for miners: *Do you want the application “forge-gateway” to accept incoming
+network connections?* Choose **Allow**; with **Deny**, miners on other devices cannot connect. To
+change it later, see the list under **Options** there. The firewall knows a program by its
+signature, and an ad-hoc signature fits only the one file it was made for: after you build a new
+version, macOS can ask again.
+
+### Start at login
+
+Stop Forge Gateway in Terminal first (Control-C): the one launchd starts needs port 3333. This
+installs forge-solo's LaunchAgent for it with your home folder in its paths (launchd expands
+neither `~` nor `$HOME`), and checks it:
+
+<!-- mac-build:start -->
+```
+mkdir -p ~/Library/LaunchAgents ~/Library/Logs/ForgeGateway
+curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-solo/main/cmd/forge-gateway/org.bitcoincashii.forge-gateway.plist | sed "s|/Users/YOU|$HOME|g" > ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
+plutil -lint ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
+```
+<!-- mac-build:end -->
+
+`plutil` says `OK`. Then start it:
+
+```
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
+```
+
+Forge Gateway runs now, at every login, and again whenever it stops. Its log is
+`~/Library/Logs/ForgeGateway/forge-gateway.log`; to follow it:
+`tail -f ~/Library/Logs/ForgeGateway/forge-gateway.log`. macOS says a background item was added:
+leave it on under **Allow in the Background** in System Settings, **General**, **Login Items**
+(**Login Items & Extensions** on macOS 15 and later).
+
+- **Restart** it, after you change `forge-gateway.json`:
+  `launchctl kill SIGTERM gui/$(id -u)/org.bitcoincashii.forge-gateway`. It stops cleanly, as
+  on Control-C, and launchd starts it again within 10 seconds.
+- **Stop** it: `launchctl bootout gui/$(id -u)/org.bitcoincashii.forge-gateway`. It starts again
+  at your next login; to stop that too, also
+  `rm ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist`.
+- **If the status page does not answer**, the config, the node login or a port is wrong, and the
+  last lines of the log say which. launchd starts it again every 10 seconds, so a gateway started
+  at login before the node has written its cookie runs once the node has.
+- **A node on another computer:** macOS 15 and later keep a program started at login this way from
+  other devices on your network until it is allowed in System Settings, **Privacy & Security**,
+  **Local Network**. With such a node, run Forge Gateway in Terminal instead, where that does not
+  apply. A node on this Mac, Forge Pool and your miners' connections are not affected.
+
+### Update
+
+Delete the source (`rm -rf ~/forge-solo`), run [Build and sign](#build-and-sign) again with the
+new version in its first line, and restart Forge Gateway: in Terminal, Control-C and run it again;
+started at login, as under **Restart** above. Your `forge-gateway.json` and `forge-gateway.key`
+stay as they are.
 
 ## Your miners
 

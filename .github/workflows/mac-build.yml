@@ -1,0 +1,344 @@
+name: Mac build
+
+# There is no Mac download: README.md's "On a Mac (build it yourself)" has Mac users build Forge
+# Gateway from source and sign it ad hoc. This runs that section's commands as a user types them,
+# in zsh (the Mac's shell), on an Apple silicon Mac and on an Intel one: the code blocks between
+# <!-- mac-build:start --> and <!-- mac-build:end -->, unchanged and in order. What needs a person
+# or a node (editing the config, a running node, the firewall's question, launchd at login) is
+# replaced by a check of the same thing. The LaunchAgent comes from forge-solo's main branch, where
+# the README fetches it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: Build it yourself (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: zsh -e -u -o pipefail {0}
+    env:
+      ARCH: ${{ matrix.arch }}
+      # forge-solo's tests' address. No node answers here, so no share is ever credited to it.
+      PAYOUT: bitcoincashii:qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzse6qye33q
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The oldest Go the README says will do. Its GOTOOLCHAIN line must fetch the release's Go.
+      - name: Set up an older Go, as a user may have
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.21.x'
+          cache: false
+
+      - name: The Mac
+        run: |
+          sw_vers
+          zsh --version
+          go version
+          if [[ "$(uname -m)" != "$ARCH" ]]; then
+            echo "::error::this runner is $(uname -m), not $ARCH"
+            exit 1
+          fi
+
+      # Each block's code, its fences dropped, into one script, in the README's order. A marker
+      # without a whole code block between it and its end is an error, not a block skipped.
+      - name: Take the README's Mac commands
+        run: |
+          awk -v out="$RUNNER_TEMP/mac-build.zsh" '
+            $0 == "<!-- mac-build:start -->" { if (on) { bad = "a start inside a block, line " NR; exit } on = 1; fence = 0; blocks++; next }
+            $0 == "<!-- mac-build:end -->" { if (!on || fence != 2) { bad = "an end with no whole code block before it, line " NR; exit } on = 0; next }
+            on && /^```/ { fence++; next }
+            on && fence == 1 { print > out; next }
+            on && NF { bad = "text beside the code block, line " NR; exit }
+            END {
+              if (bad == "" && on) bad = "a block with no end"
+              if (bad == "" && blocks == 0) bad = "no block"
+              if (bad != "") { print "::error::README.md mac-build markers: " bad; exit 1 }
+              print blocks " blocks"
+            }' README.md
+          cat -n "$RUNNER_TEMP/mac-build.zsh"
+          # One version for the whole README: the Mac section's and the Source section's.
+          versions=$(sed -n 's/^V=//p' README.md | sort -u)
+          if [[ -z "$versions" || "$versions" == *$'\n'* ]]; then
+            echo "::error::README.md's V= lines name the versions: ${versions:-none}; want one"
+            exit 1
+          fi
+          echo "V=$versions" >> "$GITHUB_ENV"
+
+      # In the home folder, where Terminal starts: a clone, a build, the signature, the node's
+      # config, the LaunchAgent and plutil's check of it. A failing command fails the step.
+      - name: Run them, as the README has them
+        run: |
+          cd ~
+          zsh -e -u -o pipefail -x "$RUNNER_TEMP/mac-build.zsh"
+
+      # The README says Go signs a program for Apple silicon under the name a.out and leaves one for
+      # an Intel Mac unsigned. The same build, without codesign, shows what Go's linker did.
+      - name: What Go's linker signs
+        run: |
+          cd ~/forge-solo
+          export GOTOOLCHAIN="$(sed -n 's/^toolchain //p' go.mod)"
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$RUNNER_TEMP/linker-only" ./cmd/forge-gateway
+          codesign --display --verbose=4 "$RUNNER_TEMP/linker-only" > "$RUNNER_TEMP/linker.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/linker.txt"
+          if [[ "$ARCH" == arm64 ]]; then
+            grep -qxF 'Identifier=a.out' "$RUNNER_TEMP/linker.txt"
+            grep -qF 'flags=0x20002(adhoc,linker-signed)' "$RUNNER_TEMP/linker.txt"
+          else
+            grep -qF 'code object is not signed at all' "$RUNNER_TEMP/linker.txt"
+          fi
+
+      - name: The program is the release's build, signed ad hoc
+        run: |
+          cd ~/ForgeGateway
+          cmp ~/forge-solo/forge-gateway forge-gateway
+          file forge-gateway
+          [[ "$(lipo -archs forge-gateway)" == "$ARCH" ]]
+          [[ "$(./forge-gateway -version)" == "forge-gateway $V" ]]
+          # The toolchain line's Go, release.yml's settings (-trimpath keeps -ldflags out of the
+          # build info; -version showed its version) and the commit FORGE_SOLO_COMMIT names at the
+          # version's tag.
+          commit=$(curl -fsSL "https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT" | tr -d '[:space:]')
+          toolchain=$(sed -n 's/^toolchain //p' ~/forge-solo/go.mod)
+          GOTOOLCHAIN="$toolchain" go version -m forge-gateway | tee "$RUNNER_TEMP/buildinfo.txt"
+          for want in "forge-gateway: $toolchain" $'\tbuild\t-trimpath=true' $'\tbuild\tCGO_ENABLED=0' \
+              $'\tbuild\tvcs.revision='"$commit" $'\tbuild\tvcs.modified=false'; do
+            if ! grep -qxF -- "$want" "$RUNNER_TEMP/buildinfo.txt"; then
+              echo "::error::the build info lacks the line: $want"
+              exit 1
+            fi
+          done
+          # What the README says the version and the Go are, wherever its lines wrap.
+          tr -s '\n ' '  ' < "$GITHUB_WORKSPACE/README.md" > "$RUNNER_TEMP/readme-flat.txt"
+          for text in "\`-version\` prints \`forge-gateway $V\`" "($toolchain for $V)"; do
+            if ! grep -qF -- "$text" "$RUNNER_TEMP/readme-flat.txt"; then
+              echo "::error::README.md does not say: $text"
+              exit 1
+            fi
+          done
+          codesign --verify --strict --verbose=2 forge-gateway 2>&1 | tee "$RUNNER_TEMP/verify.txt"
+          grep -qxF 'forge-gateway: valid on disk' "$RUNNER_TEMP/verify.txt"
+          grep -qxF 'forge-gateway: satisfies its Designated Requirement' "$RUNNER_TEMP/verify.txt"
+          codesign --display --verbose=4 forge-gateway 2>&1 | tee "$RUNNER_TEMP/display.txt"
+          grep -qxF 'Identifier=org.bitcoincashii.forge-gateway' "$RUNNER_TEMP/display.txt"
+          grep -qxF 'Signature=adhoc' "$RUNNER_TEMP/display.txt"
+          grep -qxF 'TeamIdentifier=not set' "$RUNNER_TEMP/display.txt"
+          grep -qF 'flags=0x2(adhoc)' "$RUNNER_TEMP/display.txt"
+          # The README says macOS 13 Ventura or later: the oldest macOS the program declares.
+          minos=$(otool -l forge-gateway | awk '$1 == "minos" {print $2}')
+          echo "minimum macOS: $minos"
+          if [[ "$minos" != 13.0 ]] || ! grep -qF 'macOS 13 Ventura or later' "$GITHUB_WORKSPACE/README.md"; then
+            echo "::error::the program needs macOS $minos; the README says macOS 13 Ventura or later"
+            exit 1
+          fi
+
+      # Built here, the program carries no quarantine, so Gatekeeper never assesses it. What
+      # Gatekeeper would say of it once quarantined (a download) is recorded, not required.
+      - name: Gatekeeper
+        run: |
+          cd ~/ForgeGateway
+          if xattr -p com.apple.quarantine forge-gateway 2>/dev/null; then
+            echo "::error::the program built here is quarantined"
+            exit 1
+          fi
+          spctl --status || true
+          spctl --assess --type execute --verbose=4 forge-gateway 2>&1 || true
+          cp forge-gateway "$RUNNER_TEMP/quarantined"
+          xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$RUNNER_TEMP/quarantined"
+          spctl --assess --type execute --verbose=4 "$RUNNER_TEMP/quarantined" 2>&1 || true
+
+      # In place of editing it in nano: the README's copy of the example, with what it says to set.
+      - name: Configure, as the README says to
+        run: |
+          cookie="$HOME/Library/Application Support/Bitcoin Cash II/.cookie"
+          for line in 'cp forge-gateway.example.json forge-gateway.json' 'echo "$HOME/Library/Application Support/Bitcoin Cash II/.cookie"'; do
+            if ! grep -qxF -- "$line" README.md; then
+              echo "::error::README.md no longer has the line: $line"
+              exit 1
+            fi
+          done
+          grep -qx 'server=1' "$HOME/Library/Application Support/Bitcoin Cash II/bitcoincashII.conf"
+          cd ~/ForgeGateway
+          jq --arg cookie "$cookie" --arg payout "$PAYOUT" \
+            '.node.rpc_user = "" | .node.rpc_password = "" | .node.rpc_cookie_file = $cookie | .mining.payout_address = $payout' \
+            forge-gateway.example.json > forge-gateway.json
+          cat forge-gateway.json
+
+      # No node runs here. With no cookie (the node is not running), then with one and nothing
+      # answering at the node's address, -check fails, with the README's two messages.
+      - name: -check with no node
+        run: |
+          cd ~/ForgeGateway
+          cookie="$HOME/Library/Application Support/Bitcoin Cash II/.cookie"
+          if nc -z 127.0.0.1 8342; then
+            echo "::error::something answers at 127.0.0.1:8342 on this runner"
+            exit 1
+          fi
+          check() {
+            code=0
+            ./forge-gateway -check -config forge-gateway.json > "$RUNNER_TEMP/check.txt" 2>&1 || code=$?
+            cat "$RUNNER_TEMP/check.txt"
+            if [[ $code != 1 ]] || ! grep -qxF '✓ config forge-gateway.json' "$RUNNER_TEMP/check.txt" ||
+                ! grep -q -- "$1" "$RUNNER_TEMP/check.txt"; then
+              echo "::error::-check exited $code, and did not say: $1"
+              exit 1
+            fi
+          }
+          rm -f "$cookie"
+          check "^✗ node login: node.rpc_cookie_file: open $cookie: no such file or directory\$"
+          echo '__cookie__:ci' > "$cookie"
+          check '^✗ node http://127\.0\.0\.1:8342: .*connection refused$'
+          grep -qF '`✗ node login: node.rpc_cookie_file: open ...: no such file or directory`' "$GITHUB_WORKSPACE/README.md"
+          grep -qF '`✗ node http://127.0.0.1:8342: ... connection refused`' "$GITHUB_WORKSPACE/README.md"
+          test -s forge-gateway.key
+
+      # The README's second line, as in Terminal: 10 seconds with the status page and the miners'
+      # port open, then Control-C, which stops it cleanly.
+      - name: Run it for 10 seconds
+        run: |
+          cd ~/ForgeGateway
+          ./forge-gateway -config forge-gateway.json > "$RUNNER_TEMP/run.log" 2>&1 &
+          pid=$!
+          start=$SECONDS
+          up=
+          for i in {1..10}; do
+            sleep 1
+            if curl -fsS -o "$RUNNER_TEMP/status.json" http://127.0.0.1:3090/api/status; then up=1; break; fi
+          done
+          if [[ -z "$up" ]]; then
+            cat "$RUNNER_TEMP/run.log"
+            echo "::error::the status page did not answer within 10 seconds"
+            exit 1
+          fi
+          sleep $(( 10 - (SECONDS - start) > 0 ? 10 - (SECONDS - start) : 0 ))
+          if ! kill -0 $pid 2>/dev/null; then
+            cat "$RUNNER_TEMP/run.log"
+            echo "::error::Forge Gateway ended within 10 seconds"
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:3090/ | grep -qF '<title>Forge Gateway</title>'
+          curl -fsS -o "$RUNNER_TEMP/status.json" http://127.0.0.1:3090/api/status
+          jq . "$RUNNER_TEMP/status.json"
+          [[ "$(jq -r .version "$RUNNER_TEMP/status.json")" == "$V" ]]
+          [[ "$(jq -r .configured "$RUNNER_TEMP/status.json")" == true ]]
+          nc -z 127.0.0.1 3333
+          kill -INT $pid
+          for i in {1..30}; do
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          code=0
+          wait $pid || code=$?
+          cat "$RUNNER_TEMP/run.log"
+          if [[ $code != 0 ]]; then
+            echo "::error::Control-C ended it with exit code $code"
+            exit 1
+          fi
+          grep -qF 'ready: point your miners here' "$RUNNER_TEMP/run.log"
+          grep -qF "stopping: closing the miners' connections, then sending the pool the shares still queued" "$RUNNER_TEMP/run.log"
+
+      # The firewall's question needs a person. Whether this runner's firewall is on is recorded.
+      - name: Firewall
+        run: /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate || true
+
+      # The README's install of the LaunchAgent ran above, with plutil -lint. Its paths are this
+      # user's, and name the program, the config and the log folder the README made.
+      - name: The LaunchAgent the README installed
+        run: |
+          plist="$HOME/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist"
+          cat "$plist"
+          plutil -lint "$plist"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          [[ "$(pb Label)" == org.bitcoincashii.forge-gateway ]]
+          [[ "$(pb ProgramArguments:0)" == "$HOME/ForgeGateway/forge-gateway" ]]
+          [[ "$(pb ProgramArguments:1)" == -config ]]
+          [[ "$(pb ProgramArguments:2)" == "$HOME/ForgeGateway/forge-gateway.json" ]]
+          [[ "$(pb RunAtLoad)" == true && "$(pb KeepAlive)" == true ]]
+          [[ "$(pb StandardOutPath)" == "$HOME/Library/Logs/ForgeGateway/forge-gateway.log" ]]
+          [[ "$(pb StandardErrorPath)" == "$HOME/Library/Logs/ForgeGateway/forge-gateway.log" ]]
+          test -x ~/ForgeGateway/forge-gateway
+          test -f ~/ForgeGateway/forge-gateway.json
+          test -d ~/Library/Logs/ForgeGateway
+          if grep -q /Users/YOU "$plist"; then
+            echo "::error::the installed LaunchAgent still names /Users/YOU"
+            exit 1
+          fi
+
+      # The README's launchctl lines, where this runner has a login session (gui/<uid>) for them:
+      # start, restart, stop. Without one, only the lines themselves are checked.
+      - name: launchd
+        run: |
+          log="$HOME/Library/Logs/ForgeGateway/forge-gateway.log"
+          job="gui/$(id -u)/org.bitcoincashii.forge-gateway"
+          for line in 'launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist' \
+              '`launchctl kill SIGTERM gui/$(id -u)/org.bitcoincashii.forge-gateway`' \
+              '`launchctl bootout gui/$(id -u)/org.bitcoincashii.forge-gateway`'; do
+            if ! grep -qF -- "$line" README.md; then
+              echo "::error::README.md no longer has: $line"
+              exit 1
+            fi
+          done
+          if ! launchctl print "gui/$(id -u)" > /dev/null 2>&1; then
+            echo "::warning::this runner has no gui/$(id -u) session: the LaunchAgent is not started here"
+            exit 0
+          fi
+          answers() {
+            for i in {1..30}; do
+              if curl -fsS -o /dev/null http://127.0.0.1:3090/api/status; then return 0; fi
+              sleep 1
+            done
+            cat "$log"
+            echo "::error::the status page did not answer within 30 seconds of: $1"
+            return 1
+          }
+          pid() { launchctl print "$job" | awk '$1 == "pid" {print $3; exit}'; }
+          launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
+          answers bootstrap
+          launchctl print "$job" | grep -E '^[[:space:]]*state = running$'
+          first=$(pid)
+          # The README's restart: a clean stop, and KeepAlive starts it again.
+          launchctl kill SIGTERM gui/$(id -u)/org.bitcoincashii.forge-gateway
+          second=$first
+          for i in {1..30}; do
+            sleep 1
+            second=$(pid)
+            if [[ -n "$second" && "$second" != "$first" ]]; then break; fi
+          done
+          echo "pid $first, then $second"
+          if [[ -z "$first" || -z "$second" || "$first" == "$second" ]]; then
+            cat "$log"
+            echo "::error::launchd did not start Forge Gateway again after it stopped"
+            exit 1
+          fi
+          answers 'the restart'
+          launchctl bootout gui/$(id -u)/org.bitcoincashii.forge-gateway
+          for i in {1..30}; do
+            curl -fsS -o /dev/null http://127.0.0.1:3090/api/status 2>/dev/null || break
+            sleep 1
+          done
+          if curl -fsS -o /dev/null http://127.0.0.1:3090/api/status 2>/dev/null || launchctl print "$job" > /dev/null 2>&1; then
+            echo "::error::Forge Gateway still runs after launchctl bootout"
+            exit 1
+          fi
+          cat "$log"
+          grep -qF 'ready: point your miners here' "$log"
+          grep -qF "stopping: closing the miners' connections, then sending the pool the shares still queued" "$log"
