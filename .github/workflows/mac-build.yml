@@ -47,9 +47,15 @@ jobs:
           fi
           V=$versions
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$V" ]; then
-            echo "::error::this is the tag $GITHUB_REF_NAME, and README.md builds $V"
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$V" ]; then
+              echo "::error::this is the tag $GITHUB_REF_NAME, and README.md builds $V"
+              exit 1
+            fi
+            # The tag's own run: v$V exists, and is not looked up. A look-up that failed could
+            # otherwise end the release's run green, with the Mac build skipped.
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           code=0
           git ls-remote --exit-code --tags https://github.com/BitcoincashII/forge-gateway "refs/tags/v$V" || code=$?
