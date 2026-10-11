@@ -217,21 +217,24 @@ version the release is built with, which the `toolchain` line of forge-solo's `g
 ### Build and sign
 
 `V` is the release to build: `FORGE_SOLO_COMMIT` at its tag names the forge-solo commit it is
-built from, and the `go build` line is the release workflow's.
+built from, and the `go build` line is the release workflow's. The lines after `V=` are joined by
+`&&`, so Terminal runs them as one command that stops at the first line that fails: `git clone`
+stops it if `~/forge-solo` is there already (see [Update](#update)), and a version with no release
+stops it at `git checkout`.
 
 <!-- mac-build:start -->
 ```
 V=1.1.1
-git clone https://github.com/BitcoincashII/forge-solo ~/forge-solo
-cd ~/forge-solo
-git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
-export GOTOOLCHAIN="$(sed -n 's/^toolchain //p' go.mod)"
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway
-codesign --force --sign - --identifier org.bitcoincashii.forge-gateway forge-gateway
-codesign --verify --strict --verbose=2 forge-gateway
-./forge-gateway -version
-mkdir -p ~/ForgeGateway
-rm -f ~/ForgeGateway/forge-gateway
+git clone https://github.com/BitcoincashII/forge-solo ~/forge-solo &&
+cd ~/forge-solo &&
+git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)" &&
+export GOTOOLCHAIN="$(sed -n 's/^toolchain //p' go.mod)" &&
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway &&
+codesign --force --sign - --identifier org.bitcoincashii.forge-gateway forge-gateway &&
+codesign --verify --strict --verbose=2 forge-gateway &&
+./forge-gateway -version &&
+mkdir -p ~/ForgeGateway &&
+rm -f ~/ForgeGateway/forge-gateway &&
 cp forge-gateway cmd/forge-gateway/forge-gateway.example.json ~/ForgeGateway/
 ```
 <!-- mac-build:end -->
@@ -264,9 +267,11 @@ echo server=1 >> ~/Library/Application\ Support/Bitcoin\ Cash\ II/bitcoincashII.
 <!-- mac-build:end -->
 
 Then quit the node and start it again. The app answers RPC only with `server=1`; `bitcoincashIId`
-does without it. Unless its config sets `rpcpassword`, the node writes a new login to the `.cookie`
-file in that folder each time it starts, and deletes it when it stops. Forge Gateway reads it from
-there.
+does without it. The app's own **Enable RPC server** setting (menu **Bitcoin Cash II**,
+**Preferences…**, **Main**) wins over the config file: if it is not ticked, tick it, choose **OK**
+and start the app again. Unless its config sets `rpcpassword`, the node writes a new login to the
+`.cookie` file in that folder each time it starts, and deletes it when it stops. Forge Gateway
+reads it from there.
 
 ### Configure
 
@@ -274,14 +279,15 @@ there.
 cd ~/ForgeGateway
 cp forge-gateway.example.json forge-gateway.json
 echo "$HOME/Library/Application Support/Bitcoin Cash II/.cookie"
-nano forge-gateway.json
+nano -w forge-gateway.json
 ```
 
 Set `node.rpc_user` and `node.rpc_password` to `""`, `node.rpc_cookie_file` to the path `echo`
 printed (written out in full: the config does not expand `~`), and `mining.payout_address` to your
 `bitcoincashii:q…` address. With `rpcuser` and `rpcpassword` in the node's config, set those two
 instead and leave the cookie file `""`. Save with Control-O and Return, and quit with Control-X.
-With the cookie, the node's part reads:
+The `-w` matters: without it, the editor breaks a line as long as the cookie's path in two, and
+the config no longer reads. With the cookie, the node's part reads:
 
 ```
   "node": {
@@ -299,17 +305,18 @@ With the cookie, the node's part reads:
 ./forge-gateway -config forge-gateway.json
 ```
 
-`-check` checks the config, logs in to your node and asks Forge Pool for its TIDES window. It also
-creates `forge-gateway.key` in `~/ForgeGateway`: this gateway's identity at the pool. With the node
-not running, or running without `server=1`, it says
-`✗ node login: node.rpc_cookie_file: open ...: no such file or directory` (there is no cookie), or
-with a user and password, `✗ node http://127.0.0.1:8342: ... connection refused`.
+`-check` checks the config, logs in to your node and asks Forge Pool for its TIDES window. Unless
+it stops at the config or the node login, it also creates `forge-gateway.key` in `~/ForgeGateway`:
+this gateway's identity at the pool. With the node not running, or running without `server=1`, it
+says `✗ node login: node.rpc_cookie_file: open ...: no such file or directory` (there is no
+cookie), or with a user and password, `✗ node http://127.0.0.1:8342: ... connection refused`.
 
 The second line runs Forge Gateway in this Terminal window until you press Control-C; it then
 closes your miners' connections and sends Forge Pool the shares it still holds. Its status page is
 `http://127.0.0.1:3090/`. Point your miners at `stratum+tcp://<the Mac's address>:3333`: the
 address is under **Details** of your connection in System Settings, **Network**. A Mac that sleeps
-stops your miners; `sudo pmset -c sleep 0` keeps it awake while it is on power.
+stops your miners. `sudo pmset -c sleep 0` keeps it awake while it is on power; a MacBook still
+sleeps when you close its lid.
 
 If the macOS firewall is on (System Settings, **Network**, **Firewall**), macOS asks the first time
 Forge Gateway waits for miners: *Do you want the application “forge-gateway” to accept incoming
@@ -344,12 +351,19 @@ Forge Gateway runs now, at every login, and again whenever it stops. Its log is
 leave it on under **Allow in the Background** in System Settings, **General**, **Login Items**
 (**Login Items & Extensions** on macOS 15 and later).
 
+It runs only while you are logged in: after the Mac restarts, it starts when you log in. Automatic
+login (System Settings, **Users & Groups**, **Automatically log in as**) does that for you; macOS
+does not offer it while FileVault is on.
+
 - **Restart** it, after you change `forge-gateway.json`:
   `launchctl kill SIGTERM gui/$(id -u)/org.bitcoincashii.forge-gateway`. It stops cleanly, as
   on Control-C, and launchd starts it again within 10 seconds.
 - **Stop** it: `launchctl bootout gui/$(id -u)/org.bitcoincashii.forge-gateway`. It starts again
   at your next login; to stop that too, also
   `rm ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist`.
+- **Start it again** after **Stop**: the `launchctl bootstrap` line above. To install the
+  LaunchAgent again, run **Stop** first, then the lines above from `mkdir`: `launchctl bootstrap`
+  of a LaunchAgent that is loaded fails with `Bootstrap failed: 5: Input/output error`.
 - **If the status page does not answer**, the config, the node login or a port is wrong, and the
   last lines of the log say which. launchd starts it again every 10 seconds, so a gateway started
   at login before the node has written its cookie runs once the node has.

@@ -6,19 +6,70 @@ name: Mac build
 # <!-- mac-build:start --> and <!-- mac-build:end -->, unchanged and in order. What needs a person
 # or a node (editing the config, a running node, the firewall's question, launchd at login) is
 # replaced by a check of the same thing. The LaunchAgent comes from forge-solo's main branch, where
-# the README fetches it.
+# the README fetches it: the weekly run notices a change there, or in the runners' macOS.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
 
 permissions:
   contents: read
 
 jobs:
+  # The README builds the release its V= lines name. A release is prepared on main, its section in
+  # RELEASE_NOTES.md included, before its tag exists: until then there is nothing for a Mac to
+  # build, so the Mac job is skipped with a warning, and the tag's push runs it. Asked for by hand,
+  # a version with no tag is an error.
+  release:
+    name: The release the README builds
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tagged: ${{ steps.v.outputs.tagged }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Its version, and its tag
+        id: v
+        run: |
+          # One version for the whole README: the Mac section's and the Source section's.
+          versions=$(sed -n 's/^V=//p' README.md | sort -u)
+          if [ -z "$versions" ] || [ "$(printf '%s\n' "$versions" | wc -l)" -ne 1 ]; then
+            echo "::error::README.md's V= lines name the versions: ${versions:-none}; want one"
+            exit 1
+          fi
+          V=$versions
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$V" ]; then
+            echo "::error::this is the tag $GITHUB_REF_NAME, and README.md builds $V"
+            exit 1
+          fi
+          code=0
+          git ls-remote --exit-code --tags https://github.com/BitcoincashII/forge-gateway "refs/tags/v$V" || code=$?
+          if [ "$code" = 0 ]; then
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = 2 ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] && grep -qxF "## $V" RELEASE_NOTES.md; then
+            echo "::warning::v$V is not tagged yet, so there is no release for a Mac to build: the tag's push runs the Mac build"
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = 2 ]; then
+            echo "::error::README.md builds $V, which has no tag v$V"
+            exit 1
+          else
+            echo "::error::git ls-remote could not list forge-gateway's tags (exit code $code)"
+            exit 1
+          fi
+
   mac:
     name: Build it yourself (${{ matrix.arch }})
+    needs: release
+    if: needs.release.outputs.tagged == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +85,8 @@ jobs:
         shell: zsh -e -u -o pipefail {0}
     env:
       ARCH: ${{ matrix.arch }}
+      # The release the README builds. The README's own commands do not see it: they set their own.
+      V: ${{ needs.release.outputs.version }}
       # forge-solo's tests' address. No node answers here, so no share is ever credited to it.
       PAYOUT: bitcoincashii:qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzse6qye33q
     steps:
@@ -59,13 +112,22 @@ jobs:
             exit 1
           fi
 
-      # Each block's code, its fences dropped, into one script, in the README's order. A marker
-      # without a whole code block between it and its end is an error, not a block skipped.
+      # Each block's code, its fences dropped, into one script, in the README's order. After each
+      # block, a check of its last command: zsh -e does not stop at a failure inside a list joined
+      # by &&, as the build block is, but the list then ends with that failure. A marker without a
+      # whole code block between it and its end, or a line naming mac-build: that is not exactly a
+      # marker, is an error, not a block skipped.
       - name: Take the README's Mac commands
         run: |
           awk -v out="$RUNNER_TEMP/mac-build.zsh" '
             $0 == "<!-- mac-build:start -->" { if (on) { bad = "a start inside a block, line " NR; exit } on = 1; fence = 0; blocks++; next }
-            $0 == "<!-- mac-build:end -->" { if (!on || fence != 2) { bad = "an end with no whole code block before it, line " NR; exit } on = 0; next }
+            $0 == "<!-- mac-build:end -->" {
+              if (!on || fence != 2) { bad = "an end with no whole code block before it, line " NR; exit }
+              on = 0
+              print "(( $? == 0 )) || { echo \"::error::README.md: the block that ends at line " NR " failed\"; exit 1 }" > out
+              next
+            }
+            /mac-build:/ { bad = "a marker that is not exactly <!-- mac-build:start --> or <!-- mac-build:end -->, line " NR; exit }
             on && /^```/ { fence++; next }
             on && fence == 1 { print > out; next }
             on && NF { bad = "text beside the code block, line " NR; exit }
@@ -76,20 +138,14 @@ jobs:
               print blocks " blocks"
             }' README.md
           cat -n "$RUNNER_TEMP/mac-build.zsh"
-          # One version for the whole README: the Mac section's and the Source section's.
-          versions=$(sed -n 's/^V=//p' README.md | sort -u)
-          if [[ -z "$versions" || "$versions" == *$'\n'* ]]; then
-            echo "::error::README.md's V= lines name the versions: ${versions:-none}; want one"
-            exit 1
-          fi
-          echo "V=$versions" >> "$GITHUB_ENV"
 
       # In the home folder, where Terminal starts: a clone, a build, the signature, the node's
-      # config, the LaunchAgent and plutil's check of it. A failing command fails the step.
+      # config, the LaunchAgent and plutil's check of it. A failing command fails the step. The
+      # job's V is taken out: the README's commands must set it themselves.
       - name: Run them, as the README has them
         run: |
           cd ~
-          zsh -e -u -o pipefail -x "$RUNNER_TEMP/mac-build.zsh"
+          env -u V zsh -e -u -o pipefail -x "$RUNNER_TEMP/mac-build.zsh"
 
       # The README says Go signs a program for Apple silicon under the name a.out and leaves one for
       # an Intel Mac unsigned. The same build, without codesign, shows what Go's linker did.
@@ -167,10 +223,12 @@ jobs:
           spctl --assess --type execute --verbose=4 "$RUNNER_TEMP/quarantined" 2>&1 || true
 
       # In place of editing it in nano: the README's copy of the example, with what it says to set.
+      # The README's nano keeps -w, which keeps it from breaking the cookie's long path in two.
       - name: Configure, as the README says to
         run: |
           cookie="$HOME/Library/Application Support/Bitcoin Cash II/.cookie"
-          for line in 'cp forge-gateway.example.json forge-gateway.json' 'echo "$HOME/Library/Application Support/Bitcoin Cash II/.cookie"'; do
+          for line in 'cp forge-gateway.example.json forge-gateway.json' 'echo "$HOME/Library/Application Support/Bitcoin Cash II/.cookie"' \
+              'nano -w forge-gateway.json'; do
             if ! grep -qxF -- "$line" README.md; then
               echo "::error::README.md no longer has the line: $line"
               exit 1
@@ -184,7 +242,8 @@ jobs:
           cat forge-gateway.json
 
       # No node runs here. With no cookie (the node is not running), then with one and nothing
-      # answering at the node's address, -check fails, with the README's two messages.
+      # answering at the node's address, -check fails, with the README's two messages. It makes
+      # the gateway's key only once it has the node's login, as the README says.
       - name: -check with no node
         run: |
           cd ~/ForgeGateway
@@ -205,6 +264,10 @@ jobs:
           }
           rm -f "$cookie"
           check "^✗ node login: node.rpc_cookie_file: open $cookie: no such file or directory\$"
+          if [[ -e forge-gateway.key ]]; then
+            echo "::error::-check made forge-gateway.key though it stopped at the node login"
+            exit 1
+          fi
           echo '__cookie__:ci' > "$cookie"
           check '^✗ node http://127\.0\.0\.1:8342: .*connection refused$'
           grep -qF '`✗ node login: node.rpc_cookie_file: open ...: no such file or directory`' "$GITHUB_WORKSPACE/README.md"
@@ -235,7 +298,9 @@ jobs:
             echo "::error::Forge Gateway ended within 10 seconds"
             exit 1
           fi
-          curl -fsS http://127.0.0.1:3090/ | grep -qF '<title>Forge Gateway</title>'
+          # Into a file first: grep -q leaves at its first match, which can end curl with an error.
+          curl -fsS -o "$RUNNER_TEMP/index.html" http://127.0.0.1:3090/
+          grep -qF '<title>Forge Gateway</title>' "$RUNNER_TEMP/index.html"
           curl -fsS -o "$RUNNER_TEMP/status.json" http://127.0.0.1:3090/api/status
           jq . "$RUNNER_TEMP/status.json"
           [[ "$(jq -r .version "$RUNNER_TEMP/status.json")" == "$V" ]]
@@ -310,10 +375,20 @@ jobs:
             echo "::error::the status page did not answer within 30 seconds of: $1"
             return 1
           }
-          pid() { launchctl print "$job" | awk '$1 == "pid" {print $3; exit}'; }
+          # awk reads all of launchctl's output: leaving at the first match could end launchctl
+          # with SIGPIPE, which pipefail would take for a failure.
+          pid() { launchctl print "$job" | awk '!p && $1 == "pid" {p = $3} END {print p}'; }
           launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
           answers bootstrap
           launchctl print "$job" | grep -E '^[[:space:]]*state = running$'
+          # The README: bootstrap of a LaunchAgent that is loaded fails, with this message.
+          if launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist 2> "$RUNNER_TEMP/again.txt"; then
+            echo "::error::a second launchctl bootstrap did not fail"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/again.txt"
+          grep -qF 'Bootstrap failed: 5: Input/output error' "$RUNNER_TEMP/again.txt"
+          grep -qF '`Bootstrap failed: 5: Input/output error`' README.md
           first=$(pid)
           # The README's restart: a clean stop, and KeepAlive starts it again.
           launchctl kill SIGTERM gui/$(id -u)/org.bitcoincashii.forge-gateway
