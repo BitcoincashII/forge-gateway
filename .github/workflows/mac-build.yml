@@ -412,14 +412,22 @@ jobs:
           fi
           answers 'the restart'
           launchctl bootout gui/$(id -u)/org.bitcoincashii.forge-gateway
+          # bootout returns once launchd has sent the stop; the page closes first, and launchd lets go of
+          # the job only when the program has exited, which takes longer on a slower Mac.
+          page() { curl -fsS -o /dev/null http://127.0.0.1:3090/api/status 2>/dev/null; }
+          loaded() { launchctl print "$job" > /dev/null 2>&1; }
           for i in {1..30}; do
-            curl -fsS -o /dev/null http://127.0.0.1:3090/api/status 2>/dev/null || break
+            if ! page && ! loaded; then break; fi
             sleep 1
           done
-          if curl -fsS -o /dev/null http://127.0.0.1:3090/api/status 2>/dev/null || launchctl print "$job" > /dev/null 2>&1; then
-            echo "::error::Forge Gateway still runs after launchctl bootout"
+          if page || loaded; then
+            if page; then echo "the status page still answers"; fi
+            if loaded; then launchctl print "$job" 2>&1 | head -30 || true; fi
+            cat "$log"
+            echo "::error::Forge Gateway still runs 30 seconds after launchctl bootout"
             exit 1
           fi
+          echo "stopped and unloaded $i seconds after launchctl bootout"
           cat "$log"
           grep -qF 'ready: point your miners here' "$log"
           grep -qF "stopping: closing the miners' connections, then sending the pool the shares still queued" "$log"
