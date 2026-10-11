@@ -212,7 +212,7 @@ Then install Go: the `.pkg` from [go.dev/dl](https://go.dev/dl/) (Apple macOS, A
 silicon, x86-64 for an Intel Mac), or `brew install go` if you use Homebrew. Open a new Terminal
 window afterwards. Any Go 1.21 or newer will do: the `GOTOOLCHAIN` line below has Go build with the
 version the release is built with, which the `toolchain` line of forge-solo's `go.mod` names
-(go1.27.2 for 1.1.1), and Go downloads that version by itself if it is not the one you installed.
+(go1.27.2 for 1.1.2), and Go downloads that version by itself if it is not the one you installed.
 
 ### Build and sign
 
@@ -224,7 +224,7 @@ stops it at `git checkout`.
 
 <!-- mac-build:start -->
 ```
-V=1.1.1
+V=1.1.2
 git clone https://github.com/BitcoincashII/forge-solo ~/forge-solo &&
 cd ~/forge-solo &&
 git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)" &&
@@ -245,7 +245,7 @@ sign one for an Intel Mac at all. `codesign` signs both the same way under Forge
 name, `org.bitcoincashii.forge-gateway`, as Bitcoin Cash II's Mac app is signed under
 `org.bitcoincashII.BitcoinCashII-Qt`. Run it again after anything changes the file. The check
 prints `forge-gateway: valid on disk` and `forge-gateway: satisfies its Designated Requirement`,
-and `-version` prints `forge-gateway 1.1.1`.
+and `-version` prints `forge-gateway 1.1.2`.
 
 A program you build yourself is not quarantined as a download is, so Gatekeeper lets it run
 without Apple's notarization. The `rm` matters when you update: macOS can kill a program copied
@@ -328,13 +328,13 @@ version, macOS can ask again.
 ### Start at login
 
 Stop Forge Gateway in Terminal first (Control-C): the one launchd starts needs port 3333. This
-installs forge-solo's LaunchAgent for it with your home folder in its paths (launchd expands
-neither `~` nor `$HOME`), and checks it:
+installs the LaunchAgent that comes with the source you built, in `~/forge-solo/cmd/forge-gateway`,
+with your home folder in its paths (launchd expands neither `~` nor `$HOME`), and checks it:
 
 <!-- mac-build:start -->
 ```
 mkdir -p ~/Library/LaunchAgents ~/Library/Logs/ForgeGateway
-curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-solo/main/cmd/forge-gateway/org.bitcoincashii.forge-gateway.plist | sed "s|/Users/YOU|$HOME|g" > ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
+sed "s|/Users/YOU|$HOME|g" ~/forge-solo/cmd/forge-gateway/org.bitcoincashii.forge-gateway.plist > ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
 plutil -lint ~/Library/LaunchAgents/org.bitcoincashii.forge-gateway.plist
 ```
 <!-- mac-build:end -->
@@ -371,6 +371,10 @@ does not offer it while FileVault is on.
   other devices on your network until it is allowed in System Settings, **Privacy & Security**,
   **Local Network**. With such a node, run Forge Gateway in Terminal instead, where that does not
   apply. A node on this Mac, Forge Pool and your miners' connections are not affected.
+- **"This Mac's clock is ... off":** Forge Pool refuses requests whose time is more than 2 minutes
+  off its own, so Forge Gateway mines solo (with Pool only on, turns miners away) until the clock is
+  right. Turn on **Set time and date automatically** in System Settings, **General**, **Date &
+  Time**; Forge Gateway goes back to the pool by itself within a minute.
 
 ### Update
 
@@ -502,7 +506,7 @@ its commit. These are the release workflow's commands (`.github/workflows/releas
 64-bit ARM:
 
 ```
-V=1.1.1
+V=1.1.2
 git clone https://github.com/BitcoincashII/forge-solo && cd forge-solo
 git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway

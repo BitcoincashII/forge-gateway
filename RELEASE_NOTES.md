@@ -3,6 +3,36 @@
 Each section is the release page text for that version. A `v<version>` tag in this repository
 builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
+## 1.1.2
+
+Forge Gateway can now be built and run on a Mac with the README's steps, and its status page says
+what is so on the system it runs on.
+
+- **On a Mac, build it yourself.** There is no Mac download: the README's
+  [On a Mac (build it yourself)](https://github.com/BitcoincashII/forge-gateway#on-a-mac-build-it-yourself)
+  has the steps. They build Forge Gateway from its source on macOS 13 Ventura or later, on Apple
+  silicon or Intel, sign it ad hoc as Bitcoin Cash II's own Mac app is signed, turn on your BCH2
+  node's RPC, and set Forge Gateway up to start at login with the LaunchAgent that comes with the
+  source.
+- **The clock, on a Mac and on Linux:** when Forge Pool refuses requests because the computer's
+  clock is off, the status page and the log say how to set it right on that system. A Mac is told
+  to turn on Set time and date automatically in System Settings, General, Date & Time. Linux is
+  told to set it right, for example by turning on network time, with `timedatectl set-ntp true` on
+  a system with systemd. Before, every system but Windows was told to run `timedatectl set-ntp
+  true`, which a Mac does not have, nor a Linux system without systemd. On Windows the advice is as
+  it was.
+- **The cookie file's example** in Settings was `C:\...\.cookie` on every system. It is now where a
+  BCH2 node keeps its `.cookie` on the system Forge Gateway runs on:
+  `C:\Users\<you>\AppData\Roaming\Bitcoin Cash II\.cookie` on Windows,
+  `/Users/<you>/Library/Application Support/Bitcoin Cash II/.cookie` on a Mac and
+  `/home/<you>/.bitcoincashII/.cookie` on Linux.
+- **What only Windows has is said on Windows alone.** On a Mac or Linux, the status page told you
+  to copy the settings password from the Windows tray app, said after a wrong one that it is only
+  0–9 and a–f, and said that a Windows network profile can keep miners on other devices out.
+  There, the settings password is the `SETTINGS_PASSWORD` Forge Gateway was started with, and the
+  page now says so. `/api/status` gives the system the page goes by, as `system` (`windows`,
+  `darwin` or `linux`).
+
 ## 1.1.1
 
 Forge Gateway now credits a mistyped address as a worker name in every form, and an address with a

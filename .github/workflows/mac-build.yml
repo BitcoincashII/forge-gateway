@@ -5,8 +5,8 @@ name: Mac build
 # in zsh (the Mac's shell), on an Apple silicon Mac and on an Intel one: the code blocks between
 # <!-- mac-build:start --> and <!-- mac-build:end -->, unchanged and in order. What needs a person
 # or a node (editing the config, a running node, the firewall's question, launchd at login) is
-# replaced by a check of the same thing. The LaunchAgent comes from forge-solo's main branch, where
-# the README fetches it: the weekly run notices a change there, or in the runners' macOS.
+# replaced by a check of the same thing. The LaunchAgent comes from the forge-solo source the
+# README builds. The weekly run notices a change in the runners' macOS.
 on:
   push:
     branches: [main]
