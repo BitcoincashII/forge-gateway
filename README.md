@@ -212,7 +212,7 @@ Then install Go: the `.pkg` from [go.dev/dl](https://go.dev/dl/) (Apple macOS, A
 silicon, x86-64 for an Intel Mac), or `brew install go` if you use Homebrew. Open a new Terminal
 window afterwards. Any Go 1.21 or newer will do: the `GOTOOLCHAIN` line below has Go build with the
 version the release is built with, which the `toolchain` line of forge-solo's `go.mod` names
-(go1.27.2 for 1.1.2), and Go downloads that version by itself if it is not the one you installed.
+(go1.27.2 for 1.1.3), and Go downloads that version by itself if it is not the one you installed.
 
 ### Build and sign
 
@@ -224,7 +224,7 @@ stops it at `git checkout`.
 
 <!-- mac-build:start -->
 ```
-V=1.1.2
+V=1.1.3
 git clone https://github.com/BitcoincashII/forge-solo ~/forge-solo &&
 cd ~/forge-solo &&
 git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)" &&
@@ -245,7 +245,7 @@ sign one for an Intel Mac at all. `codesign` signs both the same way under Forge
 name, `org.bitcoincashii.forge-gateway`, as Bitcoin Cash II's Mac app is signed under
 `org.bitcoincashII.BitcoinCashII-Qt`. Run it again after anything changes the file. The check
 prints `forge-gateway: valid on disk` and `forge-gateway: satisfies its Designated Requirement`,
-and `-version` prints `forge-gateway 1.1.2`.
+and `-version` prints `forge-gateway 1.1.3`.
 
 A program you build yourself is not quarantined as a download is, so Gatekeeper lets it run
 without Apple's notarization. The `rm` matters when you update: macOS can kill a program copied
@@ -506,7 +506,7 @@ its commit. These are the release workflow's commands (`.github/workflows/releas
 64-bit ARM:
 
 ```
-V=1.1.2
+V=1.1.3
 git clone https://github.com/BitcoincashII/forge-solo && cd forge-solo
 git checkout "$(curl -fsSL https://raw.githubusercontent.com/BitcoincashII/forge-gateway/v$V/FORGE_SOLO_COMMIT)"
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$V" -o forge-gateway ./cmd/forge-gateway

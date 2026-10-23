@@ -3,6 +3,31 @@
 Each section is the release page text for that version. A `v<version>` tag in this repository
 builds the release, from the forge-solo commit in `FORGE_SOLO_COMMIT`.
 
+## 1.1.3
+
+A miner reaches the right difficulty in a few steps, and the gateway can hold that difficulty
+steady against rented hashpower that keeps speeding up and slowing down. Both were behind the
+"Low Worker Difficulty" warning MiningRigRentals and NiceHash show.
+
+- **A faster climb from the starting difficulty.** A miner — above all a large or rented rig —
+  that connects at the gateway's low starting difficulty used to rise to the difficulty its hash
+  rate warrants one step per retarget, which took minutes at a high hash rate; while it rose, the
+  rental markets reported "Low Worker Difficulty". The gateway now lifts the difficulty a whole
+  step at a time whenever shares arrive far faster than the target, so it reaches the right level
+  in a few retargets, with guards that keep it from overshooting.
+- **A new `variance_percent` setting.** Rented hashpower arrives behind one connection, and a tuner
+  cycles its hash rate up and down by a third or more every few minutes. The gateway chased each
+  swing, and on the low side the difficulty could fall under the rental market's floor — another
+  cause of the warning. `variance_percent`, in the config's `stratum` section, is how far the share
+  rate may drift before the difficulty is retargeted. It defaults to 50: wide enough to hold the
+  difficulty steady against a tuner's swings, while a real change in hash rate is still followed by
+  the faster climb above.
+- **A fresh config aims for a 25-second share.** `target_share_seconds` now defaults to 25, not 5,
+  which suits the aggregated rented hashpower a gateway usually serves. A config that already sets
+  `target_share_seconds` keeps its own value.
+- **Clock advice when Forge Pool refuses a TIDES request.** When Forge Pool turns a request away
+  because this computer's clock is off, the status page now says how to set the clock right.
+
 ## 1.1.2
 
 Forge Gateway can now be built and run on a Mac with the README's steps, and its status page says
