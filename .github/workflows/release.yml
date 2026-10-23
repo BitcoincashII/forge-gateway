@@ -30,7 +30,7 @@ env:
 jobs:
   build:
     name: Build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
       commit: ${{ steps.src.outputs.commit }}
@@ -177,7 +177,7 @@ jobs:
     # A pushed v* tag only. A manual run started on a tag would otherwise sign and publish.
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Signing and its checks take a few minutes. A service that never answers must fail the job
     # well before GitHub's six-hour limit.
     timeout-minutes: 30
@@ -402,7 +402,7 @@ jobs:
     name: The build's files carry over
     if: (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && github.ref_type != 'tag'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       V: ${{ needs.build.outputs.version }}
       INSTALLER: ${{ needs.build.outputs.installer }}
