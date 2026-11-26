@@ -103,7 +103,7 @@ jobs:
 
       # The oldest Go the README says will do. Its GOTOOLCHAIN line must fetch the release's Go.
       - name: Set up an older Go, as a user may have
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.21.x'
           cache: false
